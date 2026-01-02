@@ -1,12 +1,13 @@
+// prepareUserDetails prepares the user details response map
+
 package auth
 
 import (
 	"cloud-web-phoenix-customer-v1-go/db"
 	"cloud-web-phoenix-customer-v1-go/pkg"
 
-	"net/http"
-
 	"database/sql"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
@@ -34,20 +35,13 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	// Map AccountType int to string for proc
-	accountTypeStr := "Customer"
-	if requestBody.AccountType == 0 {
-		accountTypeStr = "Admin"
-	}
-
-	query := "exec v1_PublicRole_AuthModule_GetSiteUsersAuthData @Username=@Username, @AccountType=@AccountType"
+	query := "exec v1_PublicRole_AuthModule_GetSiteUsersAuthData @Username=@Username, @AccountType='Admin'"
 	rows, err := db.DB.Query(query,
 		sql.Named("Username", requestBody.Username),
-		sql.Named("AccountType", accountTypeStr),
 	)
 	if err != nil {
 		pkg.Log("[DB QUERY ERROR]", err)
-		sendAuthError(c)
+		SendAuthError(c, 0)
 		return
 	}
 	defer rows.Close()
@@ -64,7 +58,7 @@ func SignIn(c *gin.Context) {
 		}
 		if err := rows.Scan(valuePtrs...); err != nil {
 			pkg.Log("[DB SCAN ERROR]", err)
-			sendAuthError(c)
+			SendAuthError(c, 0)
 			return
 		}
 
@@ -79,7 +73,7 @@ func SignIn(c *gin.Context) {
 		}
 	} else {
 		// ✅ No user found
-		sendAuthError(c)
+		SendAuthError(c, 0)
 		return
 	}
 
@@ -87,26 +81,75 @@ func SignIn(c *gin.Context) {
 	if passHash, ok := result["PasswordHash"].(string); ok {
 		ok, err := VerifyPassword(requestBody.Password, passHash)
 		if err != nil || !ok {
-			sendAuthError(c)
+			SendAuthError(c, 0)
 			return
 		}
 	} else {
-		sendAuthError(c)
+		SendAuthError(c, 0)
 		return
 	}
+	id := 0
+	details := gin.H{}
+	if requestBody.TFAType != "" && requestBody.TFACode != "" {
+		// write login logic with TFA
+		var secret string
+		if v, ok := result["TotpSharedSecret"]; ok && v != nil {
+			switch val := v.(type) {
+			case string:
+				secret = val
+			case []byte:
+				secret = string(val)
+			default:
+				// Unexpected type → reject gracefully
+				SendAuthError(c, 2)
+				return
+			}
+		} else {
+			// Secret not configured → reject TFA login
+			SendAuthError(c, 2)
+			return
+		}
 
-	id := result["SiteUsersId"]
+		status := ValidateTfaCode(
+			requestBody.TFAType,
+			requestBody.TFACode,
+			map[string]interface{}{
+				"bTwoFactorAppAuthEnabled": result["bTwoFactorAppAuthEnabled"],
+				"bTwoFactorSMSAuthEnabled": result["bTwoFactorSMSAuthEnabled"],
+			},
+			true,
+			secret,
+		)
+		if status == TfaTypeInvalid {
+			SendAuthError(c, 2)
+			return
+		}
+		if status != Success {
+			SendAuthError(c, 1)
+			return
+		} else {
+			if v, ok := result["SiteUsersId"].(int64); ok {
+				id = int(v)
+			}
+			// ✅ Generate tokens
+			accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err := GenerateTokens(id, false)
+			if err != nil {
+				SendAuthError(c, 0)
+				return
+			}
 
-	details := gin.H{
-		"accessToken":              nil,
-		"expiresIn":                0,
-		"refreshToken":             nil,
-		"refreshTokenExpiresIn":    0,
-		"bTwoFactorAppAuthEnabled": result["bTwoFactorAppAuthEnabled"],
-		"bTwoFactorSMSAuthEnabled": result["bTwoFactorSMSAuthEnabled"],
-		"bEmailVerified":           result["bEmailVerified"],
-		"bSuppressed":              result["bSuppressed"],
-		"accountType":              result["AccountType"],
+			// ✅ Prepare user details with tokens
+
+			details = PrepareUserDetails(result, accessToken, refreshToken, expiresIn, refreshTokenExpiresIn)
+		}
+
+	} else {
+
+		if v, ok := result["SiteUsersId"].(int64); ok {
+			id = int(v)
+		}
+		delete(result, "NavigationScopesJson") // Remove sensitive info
+		details = PrepareUserDetails(result, nil, nil, 0, 0)
 	}
 
 	// ✅ Success response
@@ -115,18 +158,5 @@ func SignIn(c *gin.Context) {
 		"details": details,
 		"status":  "1",
 		"errors":  []string{},
-	})
-}
-
-// Helper for error response
-func sendAuthError(c *gin.Context) {
-	c.JSON(http.StatusUnauthorized, gin.H{
-		"id":      0,
-		"details": nil,
-		"status":  "0",
-		"errors": []gin.H{
-			{"fieldName": "Username", "messageCode": "Username_Or_Password_Incorrect"},
-			{"fieldName": "Password", "messageCode": "Username_Or_Password_Incorrect"},
-		},
 	})
 }

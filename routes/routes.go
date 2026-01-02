@@ -8,4 +8,5 @@ import (
 
 func RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/v1/publicrole/authmodule/login", auth.SignIn)
+	router.POST("/v1/publicrole/authmodule/tfalogin", auth.SignIn)
 }

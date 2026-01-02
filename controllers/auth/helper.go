@@ -4,9 +4,21 @@ import (
 	"crypto/sha1" // PBKDF2 default in .NET Rfc2898DeriveBytes
 	"encoding/base64"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
+	"encoding/json"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"github.com/pquerna/otp"
+	"github.com/pquerna/otp/totp"
+
+	"net/http"
+
+	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -47,4 +59,150 @@ func VerifyPassword(password string, savedHash string) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// ValidateTfaCode checks OTP validity
+func ValidateTfaCode(tfaType string, tfaCode string, authData map[string]interface{}, bLogin bool, totpSharedSecret string) int {
+
+	if tfaType == "AuthenticatorApp" {
+		if bLogin && !authData["bTwoFactorAppAuthEnabled"].(bool) {
+			return NoTfaEnabled
+		}
+		secret := ""
+		if totpSharedSecret != "" {
+			secret = totpSharedSecret
+		}
+		if VerifyTotp(tfaCode, secret) {
+			return Success
+		}
+		return TfaCodeInvalid
+	}
+
+	if tfaType == "SMS" {
+		if bLogin && !authData["bTwoFactorSMSAuthEnabled"].(bool) {
+			return NoTfaEnabled
+		}
+		if time.Now().UTC().After(authData["TfaCodeExpiry"].(time.Time)) {
+			return TfaCodeExpired
+		}
+		if authData["TfaCode"].(string) == tfaCode {
+			return Success
+		}
+		return TfaCodeInvalid
+	} else if tfaType != "SMS" || tfaType != "AuthenticatorApp" {
+		return TfaTypeInvalid
+
+	}
+
+	return TfaCodeInvalid
+}
+
+// VerifyTotp validates TOTP code using secret
+func VerifyTotp(totpCode string, secretKey string) bool {
+	if secretKey == "" || totpCode == "" {
+		return false
+	}
+	// Remove spaces from the code
+	cleanCode := strings.ReplaceAll(totpCode, " ", "")
+	opts := totp.ValidateOpts{
+		Period:    30,
+		Skew:      1, // allow 1 step before/after
+		Digits:    6,
+		Algorithm: otp.AlgorithmSHA1,
+	}
+	// Validate returns (bool, error), but we only care about bool
+	valid, _ := totp.ValidateCustom(cleanCode, secretKey, time.Now().UTC(), opts)
+	return valid
+}
+func PrepareUserDetails(result map[string]interface{}, accessToken interface{}, refreshToken interface{}, expiresIn int, refreshTokenExpiresIn int) gin.H {
+	details := gin.H{
+		"accessToken":              accessToken,
+		"expiresIn":                expiresIn,
+		"refreshToken":             refreshToken,
+		"refreshTokenExpiresIn":    refreshTokenExpiresIn,
+		"bTwoFactorAppAuthEnabled": result["bTwoFactorAppAuthEnabled"],
+		"bTwoFactorSMSAuthEnabled": result["bTwoFactorSMSAuthEnabled"],
+		"bEmailVerified":           result["bEmailVerified"],
+		// "bSuppressed":              result["bSuppressed"],
+		// "accountType":              result["AccountType"],
+	}
+	if scopes, ok := result["NavigationScopesJson"]; ok && scopes != nil {
+		// fmt.Println("Parsing scopes:", scopes)
+		// Try to parse as JSON array of objects
+		var parsedScopes []map[string]interface{}
+		switch v := scopes.(type) {
+		case string:
+			if v != "" {
+				if err := json.Unmarshal([]byte(v), &parsedScopes); err == nil {
+					if len(parsedScopes) > 0 {
+						details["scopes"] = parsedScopes
+					}
+				}
+			}
+		case []map[string]interface{}:
+			if len(v) > 0 {
+				details["scopes"] = v
+			}
+		}
+	}
+	return details
+}
+func SendAuthError(c *gin.Context, errorType int) {
+	errorMsg := []gin.H{}
+	if errorType == 0 {
+
+		errorMsg = []gin.H{
+			{"fieldName": "Username", "messageCode": "Username_Or_Password_Incorrect"},
+			{"fieldName": "Password", "messageCode": "Username_Or_Password_Incorrect"},
+		}
+	} else if errorType == 1 {
+		errorMsg = []gin.H{
+			{"fieldName": "TfaCode", "messageCode": "Invalid"},
+		}
+	} else if errorType == 2 {
+		errorMsg = []gin.H{
+			{"fieldName": "TfaType", "messageCode": "TfaType_Invalid"},
+		}
+
+	}
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"id":      0,
+		"details": nil,
+		"status":  "0",
+		"errors":  errorMsg,
+	})
+}
+func GenerateTokens(userID int, rememberMe bool) (string, string, int, int, error) {
+	now := time.Now().UTC()
+
+	// Get JWT secret and expiry from environment
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "your_default_jwt_secret_here"
+	}
+	jwtExpiryStr := os.Getenv("JWT_EXPIRY_MINUTES")
+	jwtExpiryMinutes := 60
+	if jwtExpiryStr != "" {
+		if v, err := strconv.Atoi(jwtExpiryStr); err == nil {
+			jwtExpiryMinutes = v
+		}
+	}
+	jwtExpirySeconds := jwtExpiryMinutes * 60
+
+	claims := jwt.MapClaims{
+		"sub":        strconv.Itoa(userID),
+		"exp":        now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
+		"RememberMe": rememberMe,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	accessToken, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", "", 0, 0, err
+	}
+
+	refreshToken := uuid.NewString()
+	refreshExpiry := now.Add(time.Hour * 24 * 30) // 30 days
+	refreshTokenExpiresIn := int(refreshExpiry.Sub(now).Seconds())
+
+	return accessToken, refreshToken, jwtExpirySeconds, refreshTokenExpiresIn, nil
 }
