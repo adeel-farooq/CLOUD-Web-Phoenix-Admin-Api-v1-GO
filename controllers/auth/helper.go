@@ -11,6 +11,11 @@ import (
 
 	"encoding/json"
 
+	"database/sql"
+	"errors"
+
+	"cloud-web-phoenix-customer-v1-go/pkg"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/pquerna/otp"
@@ -212,14 +217,31 @@ func GenerateTokens(userID int, rememberMe bool, firstName string, lastName stri
 }
 
 // ExtractUserID extracts user ID from JWT claims
-func ExtractUser(token *jwt.Token) map[string]interface{} {
-	claims, ok := token.Claims.(jwt.MapClaims)
+func ExtractUser(c *gin.Context) map[string]interface{} {
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		return nil
+	}
+
+	// Handle Bearer token
+	token := tokenString
+	if len(tokenString) > 7 && strings.ToLower(tokenString[:7]) == "bearer " {
+		token = strings.TrimSpace(tokenString[7:])
+	}
+
+	jwtToken, _, err := new(jwt.Parser).ParseUnverified(token, jwt.MapClaims{})
+	if err != nil {
+		return nil
+	}
+
+	claims, ok := jwtToken.Claims.(jwt.MapClaims)
 	if !ok {
 		return nil
 	}
 
 	user := make(map[string]interface{})
 
+	// ---- ID handling (int / float / string safe) ----
 	if idVal, ok := claims["id"]; ok {
 		switch v := idVal.(type) {
 		case float64:
@@ -232,14 +254,15 @@ func ExtractUser(token *jwt.Token) map[string]interface{} {
 			}
 		}
 	}
-	if firstName, ok := claims["firstName"].(string); ok {
-		user["firstName"] = firstName
+
+	if v, ok := claims["firstName"].(string); ok {
+		user["firstName"] = v
 	}
-	if lastName, ok := claims["lastName"].(string); ok {
-		user["lastName"] = lastName
+	if v, ok := claims["lastName"].(string); ok {
+		user["lastName"] = v
 	}
-	if accountType, ok := claims["accountType"].(string); ok {
-		user["accountType"] = accountType
+	if v, ok := claims["accountType"].(string); ok {
+		user["accountType"] = v
 	}
 
 	if len(user) == 0 {
@@ -247,13 +270,143 @@ func ExtractUser(token *jwt.Token) map[string]interface{} {
 	}
 	return user
 }
+func ExecSP(
+	db *sql.DB,
+	spName string,
+	params map[string]interface{},
+	mode int, // 1 = single row, 2 = multi row
+) (interface{}, error) {
 
-// JsonSuccessResponse sends a standard success response
-func JsonSuccessResponse(c *gin.Context, id int, details interface{}) {
-	c.JSON(http.StatusOK, gin.H{
-		"id":      id,
-		"details": details,
-		"status":  "1",
-		"errors":  []string{},
-	})
+	if db == nil {
+		return nil, errors.New("db not initialized")
+	}
+
+	// ---- Build query ----
+	query := "exec " + spName
+	args := []interface{}{}
+
+	i := 0
+	for k := range params {
+		if i == 0 {
+			query += " "
+		} else {
+			query += ", "
+		}
+		query += "@" + k + " = @" + k
+		i++
+	}
+
+	for k, v := range params {
+		args = append(args, sql.Named(k, v))
+	}
+
+	// ---------- LOG (Before Execution) ----------
+	finalQuery := "exec " + spName
+	i = 0
+	for k, v := range params {
+		if i == 0 {
+			finalQuery += " "
+		} else {
+			finalQuery += ","
+		}
+		finalQuery += "@" + k + "="
+		switch val := v.(type) {
+		case string:
+			finalQuery += "'" + val + "'"
+		case int, int64, float64:
+			finalQuery += fmt.Sprintf("%v", val)
+		default:
+			finalQuery += fmt.Sprintf("'%v'", val)
+		}
+		i++
+	}
+
+	pkg.Log("[SP CALL]", finalQuery)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		pkg.Log("[SP ERROR]", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+
+	// ---------- MODE 1 ----------
+	if mode == 1 {
+		if !rows.Next() {
+			return nil, sql.ErrNoRows
+		}
+
+		row, err := scanRow(columns, rows)
+		if err != nil {
+			return nil, err
+		}
+
+		return row, nil
+	}
+
+	// ---------- MODE 2 ----------
+	if mode == 2 {
+		results := []map[string]interface{}{}
+
+		for rows.Next() {
+			row, err := scanRow(columns, rows)
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, row)
+		}
+
+		if len(results) == 0 {
+			return nil, sql.ErrNoRows
+		}
+
+		return results, nil
+	}
+
+	return nil, errors.New("invalid mode")
+}
+
+func scanRow(columns []string, rows *sql.Rows) (map[string]interface{}, error) {
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+
+	for i := range columns {
+		valuePtrs[i] = &values[i]
+	}
+
+	if err := rows.Scan(valuePtrs...); err != nil {
+		return nil, err
+	}
+
+	row := make(map[string]interface{})
+	for i, col := range columns {
+		val := values[i]
+		if b, ok := val.([]byte); ok {
+			row[col] = string(b)
+		} else {
+			row[col] = val
+		}
+	}
+	return row, nil
+}
+func sanitizeParams(params map[string]interface{}) map[string]interface{} {
+	safe := make(map[string]interface{})
+
+	for k, v := range params {
+		lk := strings.ToLower(k)
+		if strings.Contains(lk, "password") ||
+			strings.Contains(lk, "secret") ||
+			strings.Contains(lk, "token") {
+
+			safe[k] = "******"
+		} else {
+			safe[k] = v
+		}
+	}
+	return safe
 }
