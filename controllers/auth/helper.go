@@ -172,7 +172,7 @@ func SendAuthError(c *gin.Context, errorType int) {
 		"errors":  errorMsg,
 	})
 }
-func GenerateTokens(userID int, rememberMe bool) (string, string, int, int, error) {
+func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string) (string, string, int, int, error) {
 	now := time.Now().UTC()
 
 	// Get JWT secret and expiry from environment
@@ -190,9 +190,13 @@ func GenerateTokens(userID int, rememberMe bool) (string, string, int, int, erro
 	jwtExpirySeconds := jwtExpiryMinutes * 60
 
 	claims := jwt.MapClaims{
-		"sub":        strconv.Itoa(userID),
-		"exp":        now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
-		"RememberMe": rememberMe,
+		"sub":         strconv.Itoa(userID),
+		"exp":         now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
+		"RememberMe":  rememberMe,
+		"id":          userID,
+		"firstName":   firstName,
+		"lastName":    lastName,
+		"accountType": accountType,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	accessToken, err := token.SignedString([]byte(jwtSecret))
@@ -205,4 +209,51 @@ func GenerateTokens(userID int, rememberMe bool) (string, string, int, int, erro
 	refreshTokenExpiresIn := int(refreshExpiry.Sub(now).Seconds())
 
 	return accessToken, refreshToken, jwtExpirySeconds, refreshTokenExpiresIn, nil
+}
+
+// ExtractUserID extracts user ID from JWT claims
+func ExtractUser(token *jwt.Token) map[string]interface{} {
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil
+	}
+
+	user := make(map[string]interface{})
+
+	if idVal, ok := claims["id"]; ok {
+		switch v := idVal.(type) {
+		case float64:
+			user["id"] = int(v)
+		case int:
+			user["id"] = v
+		case string:
+			if idInt, err := strconv.Atoi(v); err == nil {
+				user["id"] = idInt
+			}
+		}
+	}
+	if firstName, ok := claims["firstName"].(string); ok {
+		user["firstName"] = firstName
+	}
+	if lastName, ok := claims["lastName"].(string); ok {
+		user["lastName"] = lastName
+	}
+	if accountType, ok := claims["accountType"].(string); ok {
+		user["accountType"] = accountType
+	}
+
+	if len(user) == 0 {
+		return nil
+	}
+	return user
+}
+
+// JsonSuccessResponse sends a standard success response
+func JsonSuccessResponse(c *gin.Context, id int, details interface{}) {
+	c.JSON(http.StatusOK, gin.H{
+		"id":      id,
+		"details": details,
+		"status":  "1",
+		"errors":  []string{},
+	})
 }

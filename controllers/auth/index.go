@@ -1,16 +1,16 @@
-// prepareUserDetails prepares the user details response map
-
 package auth
 
 import (
 	"cloud-web-phoenix-customer-v1-go/db"
 	"cloud-web-phoenix-customer-v1-go/pkg"
+	"strings"
 
 	"database/sql"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 func SignIn(c *gin.Context) {
@@ -131,8 +131,11 @@ func SignIn(c *gin.Context) {
 			if v, ok := result["SiteUsersId"].(int64); ok {
 				id = int(v)
 			}
-			// ✅ Generate tokens
-			accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err := GenerateTokens(id, false)
+			// ✅ Safely extract user info for token
+			firstName, _ := result["FirstName"].(string)
+			lastName, _ := result["LastName"].(string)
+			accountType := "Admin"
+			accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err := GenerateTokens(id, requestBody.RememberMe, firstName, lastName, accountType)
 			if err != nil {
 				SendAuthError(c, 0)
 				return
@@ -159,4 +162,32 @@ func SignIn(c *gin.Context) {
 		"status":  "1",
 		"errors":  []string{},
 	})
+}
+
+func UserFromToken(c *gin.Context) {
+	tokenString := c.GetHeader("Authorization")
+
+	var jwtToken *jwt.Token
+	var err error
+	if tokenString != "" {
+		// Handle both 'Bearer <token>' and raw token
+		token := tokenString
+		if len(tokenString) > 7 && strings.ToLower(tokenString[0:7]) == "bearer " {
+			token = strings.TrimSpace(tokenString[7:])
+		}
+		jwtToken, _, err = new(jwt.Parser).ParseUnverified(token, jwt.MapClaims{})
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			return
+		}
+		user := ExtractUser(jwtToken)
+		if user == nil {
+			c.JSON(http.StatusOK, gin.H{"details": nil, "id": 0, "status": "1", "errors": []string{}})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"details": user, "id": 0, "status": "1", "errors": []string{}})
+		}
+	} else {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
+	}
+
 }
