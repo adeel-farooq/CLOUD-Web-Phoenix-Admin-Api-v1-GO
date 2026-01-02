@@ -1,0 +1,28 @@
+# Golang
+/bin/
+/build/
+*.exe
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+
+# Environment files
+.env
+
+# Migration generated files
+*.sql
+!db/migrations/*.sql
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
