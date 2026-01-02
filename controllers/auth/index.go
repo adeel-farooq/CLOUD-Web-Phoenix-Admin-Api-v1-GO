@@ -3,7 +3,7 @@ package auth
 import (
 	"cloud-web-phoenix-customer-v1-go/db"
 	"cloud-web-phoenix-customer-v1-go/pkg"
-	"fmt"
+
 	"net/http"
 
 	"database/sql"
@@ -15,7 +15,6 @@ import (
 func SignIn(c *gin.Context) {
 	var requestBody SignInRequest
 	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		// Try to extract detailed validation errors
 		var details interface{}
 		if errs, ok := err.(validator.ValidationErrors); ok {
 			details = errs.Error()
@@ -35,75 +34,99 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	// Define struct for user data
-
-	var user UserResponse
-
 	// Map AccountType int to string for proc
 	accountTypeStr := "Customer"
 	if requestBody.AccountType == 0 {
 		accountTypeStr = "Admin"
 	}
+
 	query := "exec v1_PublicRole_AuthModule_GetSiteUsersAuthData @Username=@Username, @AccountType=@AccountType"
-	row := db.DB.QueryRow(query,
+	rows, err := db.DB.Query(query,
 		sql.Named("Username", requestBody.Username),
 		sql.Named("AccountType", accountTypeStr),
 	)
-	pkg.Log("[DB DEBUG] Would run:", fmt.Sprintf(
-		"exec v1_PublicRole_AuthModule_GetSiteUsersAuthData @Username='%s',@AccountType='%s'",
-		requestBody.Username, accountTypeStr,
-	))
-	// Scan only the fields you need (update UserResponse struct as needed)
-	err := row.Scan(
-		&user.SiteUsersId,
-		&user.CustomersId,
-		&user.CustomerUsersCustomersId,
-		&user.CustomerAccountType,
-		&user.TryLoginCount,
-		&user.PasswordHash,
-		&user.DateLastFailedLogin,
-		&user.DateLastSuccessfulLogin,
-		&user.BTwoFactorAppAuthEnabled,
-		&user.BTwoFactorSMSAuthEnabled,
-		&user.BEmailVerified,
-		&user.EmailVerificationCode,
-		&user.EmailVerificationCodeExpiry,
-		&user.PhoneNumber,
-		&user.SiteName,
-		&user.EmailAddress,
-		&user.CultureInfo,
-		&user.BFrozen,
-		&user.BSuppressed,
-		&user.TfaCode,
-		&user.TfaCodeExpiry,
-		&user.TotpSharedSecret,
-		&user.BDocumentVerified,
-		&user.FirstName,
-		&user.LastName,
-		&user.UserCode,
-		&user.AllowedAPIEndpointsCDL,
-		&user.TwoFactorSMSRequestCounter,
-		&user.DateLastTwoFactorSMSRequested,
-	)
 	if err != nil {
-		pkg.Log("[DB SCAN ERROR]", err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		pkg.Log("[DB QUERY ERROR]", err)
+		sendAuthError(c)
+		return
+	}
+	defer rows.Close()
+
+	columns, _ := rows.Columns()
+	values := make([]interface{}, len(columns))
+	valuePtrs := make([]interface{}, len(columns))
+
+	var result map[string]interface{}
+
+	if rows.Next() {
+		for i := range columns {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			pkg.Log("[DB SCAN ERROR]", err)
+			sendAuthError(c)
+			return
+		}
+
+		result = make(map[string]interface{})
+		for i, col := range columns {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				result[col] = string(b)
+			} else {
+				result[col] = val
+			}
+		}
+	} else {
+		// ✅ No user found
+		sendAuthError(c)
 		return
 	}
 
-	// ✅ Check password using VerifyPassword
-	ok, err := VerifyPassword(requestBody.Password, user.PasswordHash)
-	if err != nil || !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+	// ✅ Password check
+	if passHash, ok := result["PasswordHash"].(string); ok {
+		ok, err := VerifyPassword(requestBody.Password, passHash)
+		if err != nil || !ok {
+			sendAuthError(c)
+			return
+		}
+	} else {
+		sendAuthError(c)
 		return
 	}
 
-	// Success response (add token logic if needed)
+	id := result["SiteUsersId"]
+
+	details := gin.H{
+		"accessToken":              nil,
+		"expiresIn":                0,
+		"refreshToken":             nil,
+		"refreshTokenExpiresIn":    0,
+		"bTwoFactorAppAuthEnabled": result["bTwoFactorAppAuthEnabled"],
+		"bTwoFactorSMSAuthEnabled": result["bTwoFactorSMSAuthEnabled"],
+		"bEmailVerified":           result["bEmailVerified"],
+		"bSuppressed":              result["bSuppressed"],
+		"accountType":              result["AccountType"],
+	}
+
+	// ✅ Success response
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Sign in successful",
-		"user": gin.H{
-			"id":       user.SiteUsersId,
-			"username": requestBody.Username,
+		"id":      id,
+		"details": details,
+		"status":  "1",
+		"errors":  []string{},
+	})
+}
+
+// Helper for error response
+func sendAuthError(c *gin.Context) {
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"id":      0,
+		"details": nil,
+		"status":  "0",
+		"errors": []gin.H{
+			{"fieldName": "Username", "messageCode": "Username_Or_Password_Incorrect"},
+			{"fieldName": "Password", "messageCode": "Username_Or_Password_Incorrect"},
 		},
 	})
 }
