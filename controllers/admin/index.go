@@ -4,9 +4,9 @@ import (
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
 	"cloud-web-phoenix-customer-v1-go/db"
 	"encoding/json"
+
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -118,52 +118,76 @@ func GetAdminUsersList(c *gin.Context) {
 	}
 	siteUsersId := user["id"].(int)
 
-	// Call SP to get list data
+	// Fetch admin users list (SP call via ExecSP)
 	res, err := auth.ExecSP(
 		db.DB,
 		"v1_AdminRole_AdminUsersModule_List",
-		map[string]interface{}{"User_SiteUsersID": siteUsersId},
-		2,
+		map[string]interface{}{
+			"User_SiteUsersID": siteUsersId,
+			// Add more params if needed from query struct
+		},
+		2, // multi row
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
-	// Map rows into AdminUser slice
-	users := []AdminUser{}
+	totalCount := 0
+	listData := []map[string]interface{}{}
 	if res != nil {
-		for _, row := range res.([]map[string]interface{}) {
-			users = append(users, AdminUser{
-				ID:         int(row["AdminUsers__Id"].(int64)),
-				Code:       row["AdminUsers__AdminUsersCode"].(string),
-				Email:      row["SiteUsers__EmailAddress"].(string),
-				FirstName:  row["AdminUsers__FirstName"].(string),
-				LastName:   row["AdminUsers__LastName"].(string),
-				Suppressed: row["SiteUsers__bSuppressed"].(bool),
-				AddDate:    row["AdminUsers__AddDate"].(time.Time),
-			})
+		rawList := res.([]map[string]interface{})
+		for _, row := range rawList {
+			item := map[string]interface{}{
+				"adminUsers__AddDate":        row["AdminUsers__AddDate"],
+				"adminUsers__AdminUsersCode": row["AdminUsers__AdminUsersCode"],
+				"adminUsers__FirstName":      row["AdminUsers__FirstName"],
+				"adminUsers__Id":             row["AdminUsers__Id"],
+				"adminUsers__LastName":       row["AdminUsers__LastName"],
+				"siteUsers__bSuppressed":     row["SiteUsers__bSuppressed"],
+				"siteUsers__EmailAddress":    row["SiteUsers__EmailAddress"],
+			}
+			if v, ok := row["HowManyResults"].(int64); ok {
+				totalCount = int(v)
+			}
+
+			listData = append(listData, item)
 		}
 	}
 
-	response := AdminUsersListResponse{
-		ID:     siteUsersId,
-		Status: "1",
-		Errors: []string{},
-		Details: AdminUsersListDetails{
-			ListData:    users,
-			SummaryRows: []interface{}{},
-			Columns: []ColumnMetadata{
-				{ColumnKey: "AdminUsers__Id", LabelKey: "Id", LabelValue: "Id", OrderNumber: 1, BSortable: true, BFilterable: true, BVisible: true, BLocked: false, Type: "Integer"},
-				// add other column definitions...
-			},
-			PageNumber:   1,
-			PageSize:     10,
-			ResultsCount: len(users),
-			Errors:       []string{},
-			Metadata:     map[string]interface{}{},
-		},
+	// Prepare columns metadata (static, can be moved to helper)
+	columns := []map[string]interface{}{
+		{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Integer", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "Amount"}},
+		{"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code", "orderNumber": 2, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
+		{"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address", "orderNumber": 3, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
+		{"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name", "orderNumber": 4, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
+		{"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name", "orderNumber": 5, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
+		{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 6, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Boolean", "filterMetadata": map[string]interface{}{"filterType": "SingleChoice", "details": map[string]interface{}{"PossibleValues": []map[string]string{{"value": "0", "label": "Active"}, {"value": "1", "label": "Inactive"}}}}},
+		{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 7, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "DateTime", "filterMetadata": map[string]interface{}{"details": map[string]interface{}{"start": nil, "end": nil}, "filterType": "DateTime:Range"}},
 	}
 
-	c.JSON(http.StatusOK, response)
+	// Use totalCount variable for resultsCount, since HowManyRows is not in listData anymore
+	resultsCount := totalCount
+	details := map[string]interface{}{
+		"listData":        listData,
+		"summaryRows":     []interface{}{},
+		"columns":         columns,
+		"pageNumber":      1,
+		"pageSize":        10,
+		"filters":         nil,
+		"sortBy":          nil,
+		"searchString":    nil,
+		"bHasSearchField": true,
+		"customColumns":   nil,
+		"resultsCount":    resultsCount,
+		"metadata":        map[string]interface{}{},
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      siteUsersId,
+		"details": details,
+		"status":  "1",
+		"errors":  []string{},
+	})
+
+	// removed obsolete struct-based response, now using gin.H response above
 }

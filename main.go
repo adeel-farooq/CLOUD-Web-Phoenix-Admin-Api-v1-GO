@@ -13,6 +13,7 @@ import (
 )
 
 func main() {
+		gin.SetMode(gin.ReleaseMode)
 	// Load .env file
 	_ = godotenv.Load()
 
