@@ -17,5 +17,6 @@ func RegisterAdminRoutes(router *gin.RouterGroup) {
 	router.GET("/v1/adminrole/dashboardmodule/revenuechart", admin.GetChartsData)
 	router.GET("/v1/adminrole/dashboardmodule/usercounts", admin.GetChartsData)
 	router.GET("/v1/adminrole/adminusersmodule/list", admin.GetAdminUsersList)
+	router.GET("/v1/adminrole/licenseeadminusersmodule/list", admin.GetAdminUsersList)
 
 }

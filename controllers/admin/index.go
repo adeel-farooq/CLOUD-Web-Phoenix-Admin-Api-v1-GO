@@ -121,15 +121,7 @@ func GetAdminUsersList(c *gin.Context) {
 	// Use helper to build SQL-style SP params
 	spParams := BuildAdminUserListSPParams(c.Request.URL.Query(), siteUsersId)
 
-	columns := []map[string]interface{}{
-		{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Integer", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "Amount"}},
-		{"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code", "orderNumber": 2, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
-		{"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address", "orderNumber": 3, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
-		{"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name", "orderNumber": 4, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
-		{"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name", "orderNumber": 5, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"details": nil, "filterType": "TextContains"}},
-		{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 6, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Boolean", "filterMetadata": map[string]interface{}{"filterType": "SingleChoice", "details": map[string]interface{}{"PossibleValues": []map[string]string{{"value": "0", "label": "Active"}, {"value": "1", "label": "Inactive"}}}}},
-		{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 7, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "DateTime", "filterMetadata": map[string]interface{}{"details": map[string]interface{}{"start": nil, "end": nil}, "filterType": "DateTime:Range"}},
-	}
+	columns := GetAdminUsersColumns(c.Request.URL.Path)
 
 	res, err := auth.ExecSP(
 		db.DB,
@@ -170,15 +162,7 @@ func GetAdminUsersList(c *gin.Context) {
 	if res != nil {
 		rawList := res.([]map[string]interface{})
 		for _, row := range rawList {
-			item := map[string]interface{}{
-				"AdminUsers__AddDate":        row["AdminUsers__AddDate"],
-				"AdminUsers__AdminUsersCode": row["AdminUsers__AdminUsersCode"],
-				"AdminUsers__FirstName":      row["AdminUsers__FirstName"],
-				"AdminUsers__Id":             row["AdminUsers__Id"],
-				"AdminUsers__LastName":       row["AdminUsers__LastName"],
-				"SiteUsers__bSuppressed":     row["SiteUsers__bSuppressed"],
-				"SiteUsers__EmailAddress":    row["SiteUsers__EmailAddress"],
-			}
+			item := GetAdminUsersListData(c.Request.URL.Path, row)
 			if v, ok := row["HowManyResults"].(int64); ok {
 				totalCount = int(v)
 			}
