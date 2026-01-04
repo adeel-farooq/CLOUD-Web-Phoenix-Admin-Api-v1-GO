@@ -171,13 +171,13 @@ func GetAdminUsersList(c *gin.Context) {
 		rawList := res.([]map[string]interface{})
 		for _, row := range rawList {
 			item := map[string]interface{}{
-				"adminUsers__AddDate":        row["AdminUsers__AddDate"],
-				"adminUsers__AdminUsersCode": row["AdminUsers__AdminUsersCode"],
-				"adminUsers__FirstName":      row["AdminUsers__FirstName"],
-				"adminUsers__Id":             row["AdminUsers__Id"],
-				"adminUsers__LastName":       row["AdminUsers__LastName"],
-				"siteUsers__bSuppressed":     row["SiteUsers__bSuppressed"],
-				"siteUsers__EmailAddress":    row["SiteUsers__EmailAddress"],
+				"AdminUsers__AddDate":        row["AdminUsers__AddDate"],
+				"AdminUsers__AdminUsersCode": row["AdminUsers__AdminUsersCode"],
+				"AdminUsers__FirstName":      row["AdminUsers__FirstName"],
+				"AdminUsers__Id":             row["AdminUsers__Id"],
+				"AdminUsers__LastName":       row["AdminUsers__LastName"],
+				"SiteUsers__bSuppressed":     row["SiteUsers__bSuppressed"],
+				"SiteUsers__EmailAddress":    row["SiteUsers__EmailAddress"],
 			}
 			if v, ok := row["HowManyResults"].(int64); ok {
 				totalCount = int(v)
@@ -187,6 +187,7 @@ func GetAdminUsersList(c *gin.Context) {
 	}
 
 	// Extract values from spParams for response
+	searchString := c.Query("search")
 	details := map[string]interface{}{
 		"bHasSearchField": true,
 		"columns":         columns,
@@ -197,7 +198,7 @@ func GetAdminUsersList(c *gin.Context) {
 		"pageNumber":      spParams["PageNumber"],
 		"pageSize":        spParams["PageSize"],
 		"resultsCount":    totalCount,
-		"searchString":    nil,
+		"searchString":    searchString,
 		"sortBy":          nil,
 		"summaryRows":     []interface{}{},
 	}

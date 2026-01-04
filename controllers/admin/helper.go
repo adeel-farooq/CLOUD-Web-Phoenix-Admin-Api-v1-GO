@@ -147,7 +147,7 @@ func ConvertSearchStringToSQL(search string) string {
 		return ""
 	}
 	// For demo: just wrap in WHERE and LIKE for all fields (customize as needed)
-	fields := []string{"AdminUsers.FirstName", "AdminUsers.LastName", "SiteUsers.EmailAddress"}
+	fields := []string{"AdminUsers.FirstName", "AdminUsers.LastName", "SiteUsers.EmailAddress", "AdminUsers.AdminUsersCode"}
 	var orParts []string
 	for _, f := range fields {
 		orParts = append(orParts, f+" LIKE '%"+search+"%'")
