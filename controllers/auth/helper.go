@@ -394,19 +394,3 @@ func scanRow(columns []string, rows *sql.Rows) (map[string]interface{}, error) {
 	}
 	return row, nil
 }
-func sanitizeParams(params map[string]interface{}) map[string]interface{} {
-	safe := make(map[string]interface{})
-
-	for k, v := range params {
-		lk := strings.ToLower(k)
-		if strings.Contains(lk, "password") ||
-			strings.Contains(lk, "secret") ||
-			strings.Contains(lk, "token") {
-
-			safe[k] = "******"
-		} else {
-			safe[k] = v
-		}
-	}
-	return safe
-}
