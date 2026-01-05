@@ -119,7 +119,7 @@ func GetAdminUsersList(c *gin.Context) {
 	siteUsersId := user["id"].(int)
 
 	// Use helper to build SQL-style SP params
-	spParams := BuildAdminUserListSPParams(c.Request.URL.Query(), siteUsersId)
+	spParams := BuildAdminUserListSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
 
 	columns := GetAdminUsersColumns(c.Request.URL.Path)
 

@@ -11,7 +11,7 @@ import (
 )
 
 // Converts query params to SQL-style SP params for AdminUsers list
-func BuildAdminUserListSPParams(query url.Values, siteUsersId int) map[string]interface{} {
+func BuildAdminUserListSPParams(query url.Values, siteUsersId int, path string) map[string]interface{} {
 	// Parse pagination
 	pageNumber := 1
 	pageSize := 10
@@ -45,7 +45,7 @@ func BuildAdminUserListSPParams(query url.Values, siteUsersId int) map[string]in
 	rawSearchString := query.Get("rawSearchString")
 	sqlSearch := ""
 	if search != "" {
-		sqlSearch = ConvertSearchStringToSQL(search)
+		sqlSearch = ConvertSearchStringToSQL(search, path)
 	}
 	if rawSearchString == "" && sqlSearch != "" {
 		rawSearchString = sqlSearch
@@ -142,7 +142,7 @@ func ConvertFilterStringToSQL(filter string) string {
 }
 
 // Converts search string to SQL WHERE clause
-func ConvertSearchStringToSQL(search string) string {
+func ConvertSearchStringToSQL(search string, path string) string {
 	if search == "" {
 		return ""
 	}
@@ -152,8 +152,12 @@ func ConvertSearchStringToSQL(search string) string {
 		"AdminUsers.LastName",
 		"SiteUsers.EmailAddress",
 		"AdminUsers.AdminUsersCode",
-		"Licensees.LicenseeName",
-		"LicenseesBrands.InternalName",
+	}
+	if strings.Contains(path, "licenseeadminusersmodule") {
+		fields = append(fields,
+			"Licensees.LicenseeName",
+			"LicenseesBrands.InternalName",
+		)
 	}
 	var orParts []string
 	for _, f := range fields {
