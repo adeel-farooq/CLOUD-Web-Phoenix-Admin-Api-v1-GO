@@ -59,7 +59,7 @@ func GetChartsData(c *gin.Context) {
 	}
 
 	timeOption := c.Query("timeOption")
-	spName := getChartSPName(c.Request.URL.Path)
+	spName := getSPName(c.Request.URL.Path)
 	if spName == "" {
 		c.JSON(400, gin.H{"error": "Invalid chart endpoint"})
 		return
@@ -110,7 +110,7 @@ func GetChartsData(c *gin.Context) {
 		"message": message,
 	})
 }
-func GetAdminUsersList(c *gin.Context) {
+func GetAdminAndUserData(c *gin.Context) {
 	user := auth.ExtractUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
@@ -119,13 +119,13 @@ func GetAdminUsersList(c *gin.Context) {
 	siteUsersId := user["id"].(int)
 
 	// Use helper to build SQL-style SP params
-	spParams := BuildAdminUserListSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
+	spParams := BuildSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
 
 	columns := GetAdminUsersColumns(c.Request.URL.Path)
-
+	spName := getSPName(c.Request.URL.Path)
 	res, err := auth.ExecSP(
 		db.DB,
-		"v1_AdminRole_AdminUsersModule_List",
+		spName,
 		spParams,
 		2, // multi row
 	)

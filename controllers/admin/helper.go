@@ -1,3 +1,5 @@
+// Helper to get columns for adminrolesmodule
+
 package admin
 
 import (
@@ -11,7 +13,7 @@ import (
 )
 
 // Converts query params to SQL-style SP params for AdminUsers list
-func BuildAdminUserListSPParams(query url.Values, siteUsersId int, path string) map[string]interface{} {
+func BuildSPParams(query url.Values, siteUsersId int, path string) map[string]interface{} {
 	// Parse pagination
 	pageNumber := 1
 	pageSize := 10
@@ -54,10 +56,10 @@ func BuildAdminUserListSPParams(query url.Values, siteUsersId int, path string) 
 	// Build param map
 	spParams := map[string]interface{}{
 		"User_SiteUsersID": siteUsersId,
-		"PageNumber":       pageNumber,
-		"PageSize":         pageSize,
-		"ListKey":          "AdminUsers",
-		"TrackingID":       "Dashboard-AdminList",
+		// "PageNumber":       pageNumber,
+		// "PageSize":         pageSize,
+		// "ListKey":          "AdminUsers",
+		// "TrackingID":       "Dashboard-AdminList",
 	}
 	// Only add non-empty string params
 	if sortBy != "" {
@@ -193,7 +195,7 @@ func SendAuthError(c *gin.Context, errorType int) {
 }
 
 // getChartSPName maps chart endpoints to their respective stored procedure names
-func getChartSPName(path string) string {
+func getSPName(path string) string {
 	switch {
 	case strings.Contains(path, "/depositschart"):
 		return "v1_AdminRole_DashboardModule_GetDeposits"
@@ -209,13 +211,19 @@ func getChartSPName(path string) string {
 		return "v1_AdminRole_DashboardModule_GetRevenue"
 	case strings.Contains(path, "/usercounts"):
 		return "v1_AdminRole_DashboardModule_GetUserCounts"
+	case strings.Contains(path, "/licenseeadminusersmodule/list"):
+		return "v1_AdminRole_LicenseeAdminUsersModule_List"
+	case strings.Contains(path, "/adminusersmodule/list"):
+		return "v1_AdminRole_AdminUsersModule_List"
+	case strings.Contains(path, "/adminrolesmodule/list"):
+		return "v1_AdminRole_AdminRolesModule_List"
 	default:
 		return ""
 	}
 }
 
 // Helper to get columns based on module type (snake_case)
-func GetAdminUsersColumns(path string) []map[string]interface{} {
+func GetAdminUsersColumnsold(path string) []map[string]interface{} {
 	if strings.Contains(path, "licenseeadminusersmodule") {
 		return []map[string]interface{}{
 			{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Integer", "filterMetadata": map[string]interface{}{"filterType": "Amount", "details": nil}},
@@ -228,6 +236,21 @@ func GetAdminUsersColumns(path string) []map[string]interface{} {
 			{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 8, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Boolean", "filterMetadata": map[string]interface{}{"filterType": "SingleChoice", "details": map[string]interface{}{"PossibleValues": []map[string]string{{"value": "0", "label": "Active"}, {"value": "1", "label": "Inactive"}}}}},
 			{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 9, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "DateTime", "filterMetadata": map[string]interface{}{"filterType": "DateTime:Range", "details": map[string]interface{}{}}},
 		}
+	}
+	if strings.Contains(path, "adminrolesmodule") {
+
+		return []map[string]interface{}{
+			{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Integer", "filterMetadata": map[string]interface{}{"filterType": "Amount", "details": nil}},
+			{"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code", "orderNumber": 2, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address", "orderNumber": 3, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "Licensees__LicenseeName", "labelKey": "LicenseeName", "labelValue": "Licensee Name", "orderNumber": 4, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "LicenseesBrands__InternalName", "labelKey": "InternalName", "labelValue": "Brand Name", "orderNumber": 5, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name", "orderNumber": 6, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name", "orderNumber": 7, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "String", "filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil}},
+			{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 8, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "Boolean", "filterMetadata": map[string]interface{}{"filterType": "SingleChoice", "details": map[string]interface{}{"PossibleValues": []map[string]string{{"value": "0", "label": "Active"}, {"value": "1", "label": "Inactive"}}}}},
+			{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 9, "tooltip": nil, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false, "type": "DateTime", "filterMetadata": map[string]interface{}{"filterType": "DateTime:Range", "details": map[string]interface{}{}}},
+		}
+
 	}
 	// Default: adminusersmodule
 	return []map[string]interface{}{
@@ -266,4 +289,58 @@ func GetAdminUsersListData(path string, row map[string]interface{}) map[string]i
 		"SiteUsers__bSuppressed":     row["SiteUsers__bSuppressed"],
 		"SiteUsers__EmailAddress":    row["SiteUsers__EmailAddress"],
 	}
+}
+
+func GetAdminUsersColumns(path string) []map[string]interface{} {
+	// Common filter metadata helpers
+	activeInactive := map[string]interface{}{
+		"filterType": "SingleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]string{
+				{"value": "0", "label": "Active"},
+				{"value": "1", "label": "Inactive"},
+			},
+		},
+	}
+
+	// Column definitions per module
+	columnSets := map[string][]map[string]interface{}{
+		"licenseeadminusersmodule": {
+			{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "type": "Integer", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "Amount"}},
+			{"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code", "orderNumber": 2, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address", "orderNumber": 3, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "Licensees__LicenseeName", "labelKey": "LicenseeName", "labelValue": "Licensee Name", "orderNumber": 4, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "LicenseesBrands__InternalName", "labelKey": "InternalName", "labelValue": "Brand Name", "orderNumber": 5, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name", "orderNumber": 6, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name", "orderNumber": 7, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 8, "type": "Boolean", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": activeInactive},
+			{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 9, "type": "DateTime", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "DateTime:Range"}},
+		},
+		"adminrolesmodule": {
+			{"columnKey": "AdminRoles__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "type": "Integer", "bSortable": false, "bFilterable": false, "bVisible": false},
+			{"columnKey": "AdminRoles__Name", "labelKey": "Name", "labelValue": "Name", "orderNumber": 2, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "AdminRoles__Level", "labelKey": "Level", "labelValue": "Level", "orderNumber": 3, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "MultipleChoice", "details": map[string]interface{}{"PossibleValues": []map[string]string{{"value": "Admin", "label": "Admin"}, {"value": "Licensee", "label": "Licensee"}, {"value": "LicenseeBrand", "label": "Licensee Brand"}}}}},
+			{"columnKey": "AdminRoles__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 4, "type": "Boolean", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": activeInactive},
+			{"columnKey": "AdminRoles__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 5, "type": "DateTime", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "DateTime:Range"}},
+		},
+		"adminusersmodule": {
+			{"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id", "orderNumber": 1, "type": "Integer", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "Amount"}},
+			{"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code", "orderNumber": 2, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address", "orderNumber": 3, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name", "orderNumber": 4, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name", "orderNumber": 5, "type": "String", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "TextContains"}},
+			{"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed", "orderNumber": 6, "type": "Boolean", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": activeInactive},
+			{"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date", "orderNumber": 7, "type": "DateTime", "bSortable": true, "bFilterable": true, "bVisible": true, "filterMetadata": map[string]interface{}{"filterType": "DateTime:Range"}},
+		},
+	}
+
+	// Condition check
+	for key, cols := range columnSets {
+		if strings.Contains(path, key) {
+			return cols
+		}
+	}
+
+	// Default fallback
+	return columnSets["adminusersmodule"]
 }
