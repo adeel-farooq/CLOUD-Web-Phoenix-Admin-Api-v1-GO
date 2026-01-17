@@ -8,18 +8,11 @@ import (
 
 func RegisterRoutes(api *gin.RouterGroup) {
 	// Public auth routes
-	auth := api.Group("/v1/publicrole/authmodule")
+	auth := api.Group("/v1/publicrole")
 	v1.RegisterAuthRoutes(auth)
 
-	// Admin profile routes
-	profile := api.Group("/v1/adminrole/profilemodule")
-	v1.RegisterAdminRoutes(profile)
-
-	// Dashboard routes
-	dashboardGroup := api.Group("/v1/adminrole/dashboardmodule")
-	v1.RegisterDashboardRoutes(dashboardGroup)
-
-	// Admin users routes
-	adminGroup := api.Group("/v1/adminrole/adminusersmodule")
-	v1.RegisterAdminRoutes(adminGroup)
+	// Admin routes
+	admin := api.Group("/v1/adminrole")
+	v1.RegisterAdminRoutes(admin)
+	v1.RegisterDashboardRoutes(admin)
 }

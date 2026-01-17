@@ -9,7 +9,10 @@ import (
 
 func RegisterAdminRoutes(router *gin.RouterGroup) {
 
-	router.GET("/userinfo", auth.UserFromToken)
+	router.GET("/profilemodule/userinfo", auth.UserFromToken)
 
-	router.GET("/list", admin.GetAdminUsersData)
+	router.GET("/adminusersmodule/list", admin.GetAdminUsersData)
+	router.GET("/licenseeadminusersmodule/list", admin.GetLicenseAdminUsersData)
+	router.GET("/adminrolesmodule/list", admin.GetAdminRolesData)
+
 }

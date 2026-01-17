@@ -2,7 +2,8 @@ package admin
 
 import (
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
-	"cloud-web-phoenix-customer-v1-go/controllers/dashboard"
+	"fmt"
+	"strconv"
 
 	"cloud-web-phoenix-customer-v1-go/db"
 	"encoding/json"
@@ -44,7 +45,11 @@ func GetUserCounts(c *gin.Context) {
 		return
 	}
 
-	result := res.(map[string]interface{})
+	result, ok := auth.AsSingleRow(res)
+	if !ok {
+		c.JSON(500, gin.H{"error": "Invalid SP response"})
+		return
+	}
 
 	// ---------- Parse Details JSON safely ----------
 	var details interface{} = []interface{}{}
@@ -76,80 +81,347 @@ func GetAdminUsersData(c *gin.Context) {
 	}
 	siteUsersId := user["id"].(int)
 
-	// Use helper to build SQL-style SP params
-	spParams := dashboard.BuildSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
+	// .NET: QueryRecordListDto bind
+	q := ParseQueryRecordList(c.Request.URL.Query())
 
-	columns := dashboard.GetAdminUsersColumns(c.Request.URL.Path)
+	// .NET: Load list selections (SP) + OverrideWithExistingListSelections
+	loadSelections := func() *ListSelections {
+		sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+		params := map[string]interface{}{
+			"SiteUsersId": siteUsersId,
+			"TrackingId":  "DefaultTrackingID",
+			"ListKey":     "AdminUsers",
+		}
+		res, err := auth.ExecSP(db.DB, sp, params, 1)
+		if err != nil {
+			return nil
+		}
+		row, ok := auth.AsSingleRow(res)
+		if !ok {
+			return nil
+		}
+		return SelectionsFromRow(row)
+	}
+
+	ex := loadSelections()
+	OverrideWithSelections(&q, ex)
+
+	// Endpoint specific config (whitelist)
+	cfg := ListSPConfig{
+		ListKey:    "AdminUsers",
+		TrackingID: "DefaultTrackingID",
+		ColumnMap: map[string]string{
+			"adminUsers__Id":             "AdminUsers.Id",
+			"adminUsers__AdminUsersCode": "AdminUsers.AdminUsersCode",
+			"adminUsers__FirstName":      "AdminUsers.FirstName",
+			"adminUsers__LastName":       "AdminUsers.LastName",
+			"siteUsers__EmailAddress":    "SiteUsers.EmailAddress",
+			"siteUsers__Username":        "SiteUsers.Username",
+			"siteUsers__bSuppressed":     "SiteUsers.bSuppressed",
+			"adminUsers__AddDate":        "AdminUsers.AddDate",
+		},
+		SearchFields: []string{
+			"AdminUsers.FirstName",
+			"AdminUsers.LastName",
+			"SiteUsers.EmailAddress",
+			"AdminUsers.AdminUsersCode",
+			"SiteUsers.Username",
+		},
+	}
+
+	// .NET: AdminListHelper -> SP params
+	spParams := BuildListSPParams(q, siteUsersId, cfg)
+
+	// .NET: SP call
 	spName := "v1_AdminRole_AdminUsersModule_List"
-	res, err := auth.ExecSP(
-		db.DB,
-		spName,
-		spParams,
-		2, // multi row
-	)
+	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+	// .NET: columns metadata (frontend ko filter/sort UI ke liye)
+	columns := GetAdminUsersModuleListColumns()
+
+	respond := func(listData []map[string]interface{}, total int) {
+		details := BuildListDetails(columns, listData, q, total)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "1",
+			"id":      siteUsersId,
+			"errors":  []string{},
+			"details": details,
+		})
+	}
+
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
-			details := map[string]interface{}{
-				"listData":        []interface{}{},
-				"summaryRows":     []interface{}{},
-				"columns":         columns,
-				"pageNumber":      spParams["PageNumber"],
-				"pageSize":        spParams["PageSize"],
-				"filters":         c.Query("filters"),
-				"sortBy":          nil,
-				"searchString":    nil,
-				"bHasSearchField": true,
-				"customColumns":   nil,
-				"resultsCount":    0,
-				"errors":          []string{"No records found."},
-				"metadata":        map[string]interface{}{},
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"details": details,
-				"id":      siteUsersId,
-				"status":  "1",
-				"errors":  []string{},
-			})
+			respond([]map[string]interface{}{}, 0)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": err.Error()})
 		return
 	}
-	totalCount := 0
-	listData := []map[string]interface{}{}
-	if res != nil {
-		rawList := res.([]map[string]interface{})
-		for _, row := range rawList {
-			item := dashboard.GetAdminUsersListData(c.Request.URL.Path, row)
-			if v, ok := row["HowManyResults"].(int64); ok {
-				totalCount = int(v)
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": "Invalid SP response"})
+		return
+	}
+
+	// .NET: row mapping + HowManyResults total count
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := NormalizeRowKeys(row)
+		listData = append(listData, item)
+
+		if v, ok := row["HowManyResults"]; ok && v != nil {
+			switch t := v.(type) {
+			case int:
+				total = t
+			case int64:
+				total = int(t)
+			case float64:
+				total = int(t)
+			default:
+				i, _ := strconv.Atoi(fmt.Sprint(t))
+				if i > 0 {
+					total = i
+				}
 			}
-			listData = append(listData, item)
 		}
 	}
 
-	// Extract values from spParams for response
-	searchString := c.Query("search")
-	details := map[string]interface{}{
-		"bHasSearchField": true,
-		"columns":         columns,
-		"customColumns":   nil,
-		"filters":         c.Query("filters"), // original filter string
-		"listData":        listData,
-		"metadata":        map[string]interface{}{},
-		"pageNumber":      spParams["PageNumber"],
-		"pageSize":        spParams["PageSize"],
-		"resultsCount":    totalCount,
-		"searchString":    searchString,
-		"sortBy":          nil,
-		"summaryRows":     []interface{}{},
+	respond(listData, total)
+}
+func GetLicenseAdminUsersData(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+
+	// .NET: QueryRecordListDto bind
+	q := ParseQueryRecordList(c.Request.URL.Query())
+
+	// .NET: Load list selections (SP) + OverrideWithExistingListSelections
+	loadSelections := func() *ListSelections {
+		sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+		params := map[string]interface{}{
+			"SiteUsersId": siteUsersId,
+			"TrackingId":  "DefaultTrackingID",
+			"ListKey":     "LicenseeAdminUsers",
+		}
+		res, err := auth.ExecSP(db.DB, sp, params, 1)
+		if err != nil {
+			return nil
+		}
+		row, ok := auth.AsSingleRow(res)
+		if !ok {
+			return nil
+		}
+		return SelectionsFromRow(row)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"details": details,
-		"errors":  []string{},
-		"id":      siteUsersId,
-		"status":  "1",
-	})
+	ex := loadSelections()
+	OverrideWithSelections(&q, ex)
 
+	// Endpoint specific config (whitelist)
+	cfg := ListSPConfig{
+		ListKey:    "LicenseeAdminUsers",
+		TrackingID: "DefaultTrackingID",
+		ColumnMap: map[string]string{
+			"adminUsers__Id":             "AdminUsers.Id",
+			"adminUsers__AdminUsersCode": "AdminUsers.AdminUsersCode",
+			"adminUsers__FirstName":      "AdminUsers.FirstName",
+			"adminUsers__LastName":       "AdminUsers.LastName",
+			"adminUsers__JobTitle":       "AdminUsers.JobTitle",
+			"siteUsers__EmailAddress":    "SiteUsers.EmailAddress",
+			"siteUsers__Username":        "SiteUsers.Username",
+			"siteUsers__bSuppressed":     "SiteUsers.bSuppressed",
+			"adminUsers__AddDate":        "AdminUsers.AddDate",
+			"licensees__LicenseeName":    "Licensees.LicenseeName",
+		},
+		SearchFields: []string{
+			"AdminUsers.FirstName",
+			"AdminUsers.LastName",
+			"SiteUsers.EmailAddress",
+			"AdminUsers.AdminUsersCode",
+			"SiteUsers.Username",
+			"AdminUsers.JobTitle",
+			"Licensees.LicenseeName",
+		},
+	}
+
+	// .NET: AdminListHelper -> SP params
+	spParams := BuildListSPParams(q, siteUsersId, cfg)
+
+	// .NET: SP call
+	spName := "v1_AdminRole_LicenseeAdminUsersModule_List"
+	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+	// .NET: columns metadata (frontend ko filter/sort UI ke liye)
+	columns := GetLicenseeAdminUsersModuleListColumns()
+
+	respond := func(listData []map[string]interface{}, total int) {
+		details := BuildListDetails(columns, listData, q, total)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "1",
+			"id":      siteUsersId,
+			"errors":  []string{},
+			"details": details,
+		})
+	}
+
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			respond([]map[string]interface{}{}, 0)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": err.Error()})
+		return
+	}
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": "Invalid SP response"})
+		return
+	}
+
+	// .NET: row mapping + HowManyResults total count
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := NormalizeRowKeys(row)
+		listData = append(listData, item)
+
+		if v, ok := row["HowManyResults"]; ok && v != nil {
+			switch t := v.(type) {
+			case int:
+				total = t
+			case int64:
+				total = int(t)
+			case float64:
+				total = int(t)
+			default:
+				i, _ := strconv.Atoi(fmt.Sprint(t))
+				if i > 0 {
+					total = i
+				}
+			}
+		}
+	}
+
+	respond(listData, total)
+}
+func GetAdminRolesData(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+
+	// .NET: QueryRecordListDto bind
+	q := ParseQueryRecordList(c.Request.URL.Query())
+
+	// .NET: Load list selections (SP) + OverrideWithExistingListSelections
+	loadSelections := func() *ListSelections {
+		sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+		params := map[string]interface{}{
+			"SiteUsersId": siteUsersId,
+			"TrackingId":  "DefaultTrackingID",
+			"ListKey":     "AdminRoles",
+		}
+		res, err := auth.ExecSP(db.DB, sp, params, 1)
+		if err != nil {
+			return nil
+		}
+		row, ok := auth.AsSingleRow(res)
+		if !ok {
+			return nil
+		}
+		return SelectionsFromRow(row)
+	}
+
+	ex := loadSelections()
+	OverrideWithSelections(&q, ex)
+
+	// Endpoint specific config (whitelist)
+	cfg := ListSPConfig{
+		ListKey:    "AdminRoles",
+		TrackingID: "DefaultTrackingID",
+		ColumnMap: map[string]string{
+			"adminRoles__Id":          "AdminRoles.Id",
+			"adminRoles__Name":        "AdminRoles.Name",
+			"adminRoles__Level":       "AdminRoles.Level",
+			"adminRoles__bSuppressed": "AdminRoles.bSuppressed",
+			"adminRoles__AddDate":     "AdminRoles.AddDate",
+		},
+		SearchFields: []string{
+			"AdminRoles.Name",
+			"AdminRoles.Level",
+		},
+	}
+
+	// .NET: AdminListHelper -> SP params
+	spParams := BuildListSPParams(q, siteUsersId, cfg)
+
+	// .NET: SP call
+	spName := "v1_AdminRole_AdminRolesModule_List"
+	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+	// .NET: columns metadata (frontend ko filter/sort UI ke liye)
+	columns := GetAdminRolesModuleListColumns()
+
+	respond := func(listData []map[string]interface{}, total int) {
+		details := BuildListDetails(columns, listData, q, total)
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "1",
+			"id":      siteUsersId,
+			"errors":  []string{},
+			"details": details,
+		})
+	}
+
+	if err != nil {
+		if err.Error() == "sql: no rows in result set" {
+			respond([]map[string]interface{}{}, 0)
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": err.Error()})
+		return
+	}
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": "Invalid SP response"})
+		return
+	}
+
+	// .NET: row mapping + HowManyResults total count
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := NormalizeRowKeys(row)
+		listData = append(listData, item)
+
+		if v, ok := row["HowManyResults"]; ok && v != nil {
+			switch t := v.(type) {
+			case int:
+				total = t
+			case int64:
+				total = int(t)
+			case float64:
+				total = int(t)
+			default:
+				i, _ := strconv.Atoi(fmt.Sprint(t))
+				if i > 0 {
+					total = i
+				}
+			}
+		}
+	}
+
+	respond(listData, total)
 }

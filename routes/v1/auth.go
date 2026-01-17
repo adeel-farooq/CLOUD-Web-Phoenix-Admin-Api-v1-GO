@@ -7,7 +7,7 @@ import (
 )
 
 func RegisterAuthRoutes(router *gin.RouterGroup) {
-	router.POST("/login", auth.SignIn)
-	router.POST("/tfalogin", auth.SignIn)
+	router.POST("/authmodule/login", auth.SignIn)
+	router.POST("/authmodule/tfalogin", auth.SignIn)
 
 }

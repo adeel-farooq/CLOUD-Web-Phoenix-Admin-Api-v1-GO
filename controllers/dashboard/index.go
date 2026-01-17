@@ -32,7 +32,11 @@ func ProductsList(c *gin.Context) {
 		return
 	}
 
-	result := res.(map[string]interface{})
+	result, ok := auth.AsSingleRow(res)
+	if !ok {
+		c.JSON(500, gin.H{"error": "Invalid SP response"})
+		return
+	}
 
 	// ---- Parse Details JSON ----
 	var products []map[string]interface{}
@@ -81,7 +85,11 @@ func GetChartsData(c *gin.Context) {
 		return
 	}
 
-	result := res.(map[string]interface{})
+	result, ok := auth.AsSingleRow(res)
+	if !ok {
+		c.JSON(500, gin.H{"error": "Invalid SP response"})
+		return
+	}
 
 	// ---------- Parse Details JSON safely ----------
 	var details interface{} = []interface{}{}

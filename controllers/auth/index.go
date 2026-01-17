@@ -41,7 +41,11 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	result := res.(map[string]interface{})
+	result, ok := AsSingleRow(res)
+	if !ok {
+		SendAuthError(c, 0)
+		return
+	}
 
 	// ---------- Password Validation ----------
 	passHash, ok := result["PasswordHash"].(string)

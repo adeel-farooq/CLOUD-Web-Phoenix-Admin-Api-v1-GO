@@ -371,6 +371,28 @@ func ExecSP(
 	return nil, errors.New("invalid mode")
 }
 
+// AsSingleRow normalizes a stored-procedure result into a single row.
+// Some call-sites historically assumed mode=1 could return a slice; this keeps them resilient.
+func AsSingleRow(res interface{}) (map[string]interface{}, bool) {
+	switch v := res.(type) {
+	case map[string]interface{}:
+		return v, true
+	case []map[string]interface{}:
+		if len(v) == 0 {
+			return nil, false
+		}
+		return v[0], true
+	case []interface{}:
+		if len(v) == 0 {
+			return nil, false
+		}
+		row, ok := v[0].(map[string]interface{})
+		return row, ok
+	default:
+		return nil, false
+	}
+}
+
 func scanRow(columns []string, rows *sql.Rows) (map[string]interface{}, error) {
 	values := make([]interface{}, len(columns))
 	valuePtrs := make([]interface{}, len(columns))
