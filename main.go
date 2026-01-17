@@ -38,8 +38,7 @@ func main() {
 		c.String(404, "Not Found")
 	})
 	api := r.Group("/api")
-	routes.RegisterAuthRoutes(api)
-	routes.RegisterAdminRoutes(api)
+	routes.RegisterRoutes(api)
 
 	fmt.Printf("Server running at %s:%s/\n", url, port)
 	log.Fatal(r.Run(":" + port))

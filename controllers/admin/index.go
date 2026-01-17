@@ -2,55 +2,17 @@ package admin
 
 import (
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
+	"cloud-web-phoenix-customer-v1-go/controllers/dashboard"
+
 	"cloud-web-phoenix-customer-v1-go/db"
 	"encoding/json"
-
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-func ProductsList(c *gin.Context) {
-
-	user := auth.ExtractUser(c)
-	if user == nil {
-		c.JSON(401, gin.H{"message": "Unauthorized"})
-		return
-	}
-
-	res, err := auth.ExecSP(
-		db.DB,
-		"v1_AdminRole_DashboardModule_ListProducts",
-		map[string]interface{}{
-			"SiteUsersId": user["id"],
-		},
-		1,
-	)
-
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-
-	result := res.(map[string]interface{})
-
-	// ---- Parse Details JSON ----
-	var products []map[string]interface{}
-	if detailsStr, ok := result["Details"].(string); ok {
-		_ = json.Unmarshal([]byte(detailsStr), &products)
-	}
-
-	c.JSON(200, gin.H{
-		"id":      result["Id"],
-		"details": products,
-		"status":  result["Status"],
-		"errors":  []interface{}{},
-		"message": "Products fetched successfully",
-	})
-}
-
-func GetChartsData(c *gin.Context) {
+func GetUserCounts(c *gin.Context) {
 
 	user := auth.ExtractUser(c)
 	if user == nil {
@@ -59,7 +21,7 @@ func GetChartsData(c *gin.Context) {
 	}
 
 	timeOption := c.Query("timeOption")
-	spName := getSPName(c.Request.URL.Path)
+	spName := "v1_AdminRole_DashboardModule_GetUserCounts"
 	if spName == "" {
 		c.JSON(400, gin.H{"error": "Invalid chart endpoint"})
 		return
@@ -97,20 +59,16 @@ func GetChartsData(c *gin.Context) {
 			return
 		}
 	}
-	message := "Chart data fetched successfully"
-	if strings.Contains(c.Request.URL.Path, "usercounts") {
-		message = "User counts fetched successfully"
-	}
 
 	c.JSON(200, gin.H{
 		"id":      result["Id"],
 		"details": details,
 		"status":  result["Status"],
 		"errors":  []interface{}{},
-		"message": message,
+		"message": "User counts fetched successfully",
 	})
 }
-func GetAdminAndUserData(c *gin.Context) {
+func GetAdminUsersData(c *gin.Context) {
 	user := auth.ExtractUser(c)
 	if user == nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
@@ -119,10 +77,10 @@ func GetAdminAndUserData(c *gin.Context) {
 	siteUsersId := user["id"].(int)
 
 	// Use helper to build SQL-style SP params
-	spParams := BuildSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
+	spParams := dashboard.BuildSPParams(c.Request.URL.Query(), siteUsersId, c.Request.URL.Path)
 
-	columns := GetAdminUsersColumns(c.Request.URL.Path)
-	spName := getSPName(c.Request.URL.Path)
+	columns := dashboard.GetAdminUsersColumns(c.Request.URL.Path)
+	spName := "v1_AdminRole_AdminUsersModule_List"
 	res, err := auth.ExecSP(
 		db.DB,
 		spName,
@@ -162,7 +120,7 @@ func GetAdminAndUserData(c *gin.Context) {
 	if res != nil {
 		rawList := res.([]map[string]interface{})
 		for _, row := range rawList {
-			item := GetAdminUsersListData(c.Request.URL.Path, row)
+			item := dashboard.GetAdminUsersListData(c.Request.URL.Path, row)
 			if v, ok := row["HowManyResults"].(int64); ok {
 				totalCount = int(v)
 			}
