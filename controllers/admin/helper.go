@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"cloud-web-phoenix-customer-v1-go/controllers/auth"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -8,22 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"cloud-web-phoenix-customer-v1-go/db"
+	"encoding/json"
 	// "github.com/jmoiron/sqlx"
 )
-
-// func GetListSelections(db *sqlx.DB, siteUsersId int, trackingId, listKey string) (*ListSelections, error) {
-// 	sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
-// 	params := map[string]interface{}{
-// 		"SiteUsersId": siteUsersId,
-// 		"TrackingId":  trackingId,
-// 		"ListKey":     listKey,
-// 	}
-
-// 	// NOTE: yahan aap apna ExecSP use kar rahe ho already. Main yeh function "pure" rakhta hun.
-// 	// Is liye is file me direct ExecSP call nahi kar raha.
-// 	// Aap isko apne layer me call karke row map se ListSelections fill kar lo.
-// 	return nil, fmt.Errorf("GetListSelections: implement adapter using your ExecSP")
-// }
 
 func ParseQueryRecordList(q url.Values) QueryRecordList {
 	parseBool := func(v string) bool { return strings.ToLower(strings.TrimSpace(v)) == "true" }
@@ -725,4 +715,407 @@ func BuildColumnsFromSPRow(row map[string]interface{}, orderStart int) []map[str
 	}
 
 	return cols
+}
+
+func GetAdminRoleLevels() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"label": "Admin", "value": "Admin"},
+		{"label": "Licensee", "value": "Licensee"},
+		{"label": "LicenseeBrand", "value": "LicenseeBrand"},
+	}
+}
+
+func GetAdminRolesCreateMetadata() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"name": "Name", "type": "String", "customType": nil, "label": "Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "bSuppressed", "type": "Boolean", "customType": nil, "label": "Suppressed",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "Level", "type": "SingleSelect", "customType": nil, "label": "Level",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": "listAdminRoleLevels",
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AccessRights", "type": "AccessRights", "customType": nil, "label": "Access Rights",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+	}
+}
+
+// -------------- SP Call --------------
+
+func LoadAdminRolesCreateDetails(level string) (map[string]interface{}, map[string]interface{}, error) {
+	spName := "v1_AdminRole_AdminRolesModule_GetCreateDetails"
+	params := map[string]interface{}{}
+	if strings.TrimSpace(level) != "" {
+		params["AdminRoleLevel"] = level
+	}
+
+	// SP returns single row: Status, Id, Details (json), Errors
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	row, ok := res.(map[string]interface{})
+	if !ok {
+		return nil, nil, err
+	}
+
+	// Parse Details JSON (SP JSON PATH nested strings issue)
+	detailsStr, _ := row["Details"].(string)
+	parsed, err := ParseAndFixNestedJSON(detailsStr)
+	if err != nil {
+		return row, nil, err
+	}
+
+	// Convert SP PascalCase keys -> frontend expected camelCase keys (for details/accessRights)
+	details := BuildCreateDetailsForFrontend(parsed)
+
+	return row, details, nil
+}
+
+// -------------- JSON Helpers --------------
+
+// SP ke Details me nested JSON aksar string form me hota hai (AccessRights, ChildElements)
+// Ye function usko recursively real array/map me convert kar deta hai.
+func ParseAndFixNestedJSON(raw string) (map[string]interface{}, error) {
+	out := map[string]interface{}{}
+
+	if strings.TrimSpace(raw) == "" {
+		return out, nil
+	}
+
+	// SQL output is already valid JSON; no need for replace, but safe handling:
+	clean := strings.TrimSpace(raw)
+
+	if err := json.Unmarshal([]byte(clean), &out); err != nil {
+		return nil, err
+	}
+
+	fixed := fixNestedJSON(out)
+	asMap, _ := fixed.(map[string]interface{})
+	if asMap == nil {
+		return map[string]interface{}{}, nil
+	}
+	return asMap, nil
+}
+
+func fixNestedJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = fixNestedJSON(val)
+		}
+		return t
+	case []interface{}:
+		for i := range t {
+			t[i] = fixNestedJSON(t[i])
+		}
+		return t
+	case string:
+		s := strings.TrimSpace(t)
+		if len(s) > 0 && (s[0] == '{' || s[0] == '[') {
+			var x interface{}
+			if err := json.Unmarshal([]byte(s), &x); err == nil {
+				return fixNestedJSON(x)
+			}
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+// -------------- Mapping Helpers --------------
+
+func BuildCreateDetailsForFrontend(spDetails map[string]interface{}) map[string]interface{} {
+	// SP keys: Id, Name, bSuppressed, Level, AccessRights (often decoded to []interface{})
+	// Frontend keys: id, name, bSuppressed, level, listAdminRoleLevels, accessRights
+
+	out := map[string]interface{}{}
+	out["id"] = toInt(spDetails["Id"])
+	out["name"] = spDetails["Name"]
+
+	// bSuppressed SQL gives 0/1 (float64) sometimes
+	out["bSuppressed"] = toBool(spDetails["bSuppressed"])
+
+	out["level"] = spDetails["Level"]
+	out["listAdminRoleLevels"] = GetAdminRoleLevels()
+
+	// accessRights: rename keys inside tree
+	out["accessRights"] = renameAccessTree(spDetails["AccessRights"])
+
+	return out
+}
+
+func renameAccessTree(v interface{}) interface{} {
+	switch t := v.(type) {
+	case []interface{}:
+		for i := range t {
+			t[i] = renameAccessTree(t[i])
+		}
+		return t
+	case map[string]interface{}:
+		out := map[string]interface{}{}
+		// SP keys: Id, DisplayName, Path, bHasAccess, ChildElements
+		if val, ok := t["Id"]; ok {
+			out["id"] = toInt(val)
+		}
+		if val, ok := t["DisplayName"]; ok {
+			out["displayName"] = val
+		}
+		if val, ok := t["Path"]; ok {
+			out["path"] = val
+		}
+		if val, ok := t["bHasAccess"]; ok {
+			out["bHasAccess"] = toBool(val)
+		}
+		// ChildElements can be null or [] or string-json already fixed
+		if val, ok := t["ChildElements"]; ok {
+			out["childElements"] = renameAccessTree(val)
+		} else {
+			out["childElements"] = nil
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func toInt(v interface{}) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case float64:
+		return int(x)
+	case string:
+		// best-effort
+		var i int
+		_ = json.Unmarshal([]byte(x), &i)
+		return i
+	default:
+		return 0
+	}
+}
+
+func toBool(v interface{}) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case int:
+		return x != 0
+	case int64:
+		return x != 0
+	case float64:
+		return x != 0
+	case string:
+		s := strings.ToLower(strings.TrimSpace(x))
+		return s == "1" || s == "true" || s == "yes"
+	default:
+		return false
+	}
+}
+
+func isValidAdminRoleLevel(level string) bool {
+	switch level {
+	case "Admin", "Licensee", "LicenseeBrand":
+		return true
+	default:
+		return false
+	}
+}
+
+func getAddedByFromToken(user map[string]interface{}) string {
+	// JWT me tumhare sample ke mutabiq FirstName/LastName/UserCode hota hai
+	fn := fmt.Sprint(user["FirstName"])
+	ln := fmt.Sprint(user["LastName"])
+	code := fmt.Sprint(user["UserCode"])
+
+	full := strings.TrimSpace(strings.TrimSpace(fn) + " " + strings.TrimSpace(ln))
+	if full == "" {
+		full = code
+	}
+	// AddedBy field free text hai, is format se trace easy hota hai
+	if code != "" && full != code {
+		return full + " (" + code + ")"
+	}
+	return full
+}
+
+func buildAdminRoleCreateMetadata() []FormMeta {
+	return []FormMeta{
+		{
+			Name: "Name", Type: "String", Label: "Name",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "bSuppressed", Type: "Boolean", Label: "Suppressed",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "Level", Type: "SingleSelect", Label: "Level",
+			BRequired: false, BRemoteDataSource: false, DataSource: "listAdminRoleLevels",
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "AccessRights", Type: "AccessRights", Label: "Access Rights",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+	}
+}
+
+func parseDbResultRow(row map[string]interface{}) (DbResultRow, error) {
+	out := DbResultRow{
+		Id:      0,
+		Status:  "0",
+		Details: map[string]interface{}{},
+		Errors:  []string{},
+	}
+
+	// Id
+	if v, ok := row["Id"]; ok && v != nil {
+		// ExecSP aksar int64 ya float64 de deta hai
+		switch t := v.(type) {
+		case int:
+			out.Id = t
+		case int64:
+			out.Id = int(t)
+		case float64:
+			out.Id = int(t)
+		default:
+			// ignore
+		}
+	}
+
+	// Status
+	if v, ok := row["Status"]; ok && v != nil {
+		out.Status = fmt.Sprint(v)
+	}
+
+	// Details JSON
+	if v, ok := row["Details"]; ok && v != nil {
+		s := fmt.Sprint(v)
+		if strings.TrimSpace(s) != "" {
+			var obj interface{}
+			if err := json.Unmarshal([]byte(s), &obj); err == nil {
+				out.Details = obj
+			} else {
+				// fallback: raw string
+				out.Details = s
+			}
+		}
+	}
+
+	// Errors JSON
+	if v, ok := row["Errors"]; ok && v != nil {
+		s := fmt.Sprint(v)
+		if strings.TrimSpace(s) != "" {
+			var arr []string
+			if err := json.Unmarshal([]byte(s), &arr); err == nil {
+				out.Errors = arr
+			} else {
+				out.Errors = []string{s}
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func spGetCreateDetails(level string) (DbResultRow, error) {
+	sp := "v1_AdminRole_AdminRolesModule_GetCreateDetails"
+	params := map[string]interface{}{
+		"AdminRoleLevel": level,
+	}
+	res, err := auth.ExecSP(db.DB, sp, params, 1)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+	return parseDbResultRow(rows[0])
+}
+
+func spCreateAdminRole(siteUsersId int, addedBy string, req AdminRoleCreateRequest) (DbResultRow, error) {
+
+	// SP expects comma-separated CDL in @AccessRightsCdl
+	accessCdl := BuildAccessRightsCDL(req.AccessRights)
+
+	sp := "v1_AdminRole_AdminRolesModule_Create"
+	params := map[string]interface{}{
+		"Name":             req.Name,
+		"AdminRoleLevel":   req.Level,
+		"bSuppressed":      req.BSuppressed,
+		"AccessRightsCdl":  accessCdl,
+		"User_SiteUsersID": siteUsersId,
+		"User_AddedBy":     addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+	return parseDbResultRow(rows[0])
+}
+
+func BuildAccessRightsCDL(nodes []AccessRightNode) string {
+	seen := map[int]bool{}
+	ids := make([]int, 0, 128)
+
+	var walk func(list []AccessRightNode)
+	walk = func(list []AccessRightNode) {
+		for _, n := range list {
+			if n.BHasAccess {
+				if !seen[n.Id] {
+					seen[n.Id] = true
+					ids = append(ids, n.Id)
+				}
+			}
+			if len(n.ChildElements) > 0 {
+				walk(n.ChildElements)
+			}
+		}
+	}
+	walk(nodes)
+
+	// join with comma
+	if len(ids) == 0 {
+		return ""
+	}
+	sb := strings.Builder{}
+	for i, id := range ids {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(strconv.Itoa(id))
+	}
+	return sb.String()
 }

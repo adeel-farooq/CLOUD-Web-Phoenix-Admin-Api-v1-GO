@@ -425,3 +425,121 @@ func GetAdminRolesData(c *gin.Context) {
 
 	respond(listData, total)
 }
+func GetAdminRolesCreate(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	// siteUsersId := 0
+	// if v, ok := user["id"].(int); ok {
+	// 	siteUsersId = v
+	// }
+
+	// URL: /create?level=Admin|Licensee|LicenseeBrand
+	level := c.Query("level")
+	if level == "" {
+		level = "Admin"
+	}
+	row, details, err := LoadAdminRolesCreateDetails(level)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors":  []map[string]interface{}{{"fieldName": "General", "messageCode": err.Error()}},
+		})
+		return
+	}
+
+	// SP status/errors
+	status := "1"
+	if s, ok := row["Status"]; ok {
+		// SP might return int/bit
+		switch v := s.(type) {
+		case int:
+			if v == 0 {
+				status = "0"
+			}
+		case int64:
+			if v == 0 {
+				status = "0"
+			}
+		case float64:
+			if int(v) == 0 {
+				status = "0"
+			}
+		case string:
+			if v == "0" {
+				status = "0"
+			}
+		}
+	}
+
+	// Errors: SP returns @ValidationMessage as string
+	errorsArr := []interface{}{}
+	if status == "0" {
+		if msg, ok := row["Errors"].(string); ok && msg != "" {
+			// aap chahein to isko .NET style field errors me parse bhi kar sakte ho
+			errorsArr = append(errorsArr, gin.H{
+				"fieldName":   "AdminRoleLevel",
+				"messageCode": msg,
+			})
+		}
+	}
+
+	// metadata always same
+	metadata := GetAdminRolesCreateMetadata()
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       0,
+		"details":  details,
+		"metadata": metadata,
+		"status":   status,
+		"errors":   errorsArr,
+	})
+}
+
+func PostCreateAdminRole(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+	addedBy := getAddedByFromToken(user)
+
+	var req AdminRoleCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Invalid JSON body"}})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Name is required"}})
+		return
+	}
+	if !isValidAdminRoleLevel(req.Level) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Invalid level"}})
+		return
+	}
+	if req.AccessRights == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"AccessRights is required"}})
+		return
+	}
+
+	dbRes, err := spCreateAdminRole(siteUsersId, addedBy, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "errors": []string{err.Error()}})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      dbRes.Id,
+		"details": dbRes.Details,
+		"status":  dbRes.Status,
+		"errors":  dbRes.Errors,
+	})
+}
