@@ -425,6 +425,7 @@ func GetAdminRolesData(c *gin.Context) {
 
 	respond(listData, total)
 }
+
 func GetAdminRolesCreate(c *gin.Context) {
 	user := auth.ExtractUser(c)
 	if user == nil {
@@ -536,10 +537,124 @@ func PostCreateAdminRole(c *gin.Context) {
 		return
 	}
 
+	metadata := GetAdminRolesCreateMetadata()
+
+	// Return SP response only (no extra GetEditDetails call)
+	roleID := dbRes.Id
+	details := NormalizeAdminRoleDetails(dbRes.Details)
+
 	c.JSON(http.StatusOK, gin.H{
-		"id":      dbRes.Id,
-		"details": dbRes.Details,
-		"status":  dbRes.Status,
-		"errors":  dbRes.Errors,
+		"id":       roleID,
+		"details":  details,
+		"metadata": metadata,
+		"status":   dbRes.Status,
+		"errors":   dbRes.Errors,
+	})
+}
+func GetAdminRolesEditDetails(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+
+	idStr := c.Query("Id")
+	if idStr == "" {
+		idStr = c.Query("id")
+	}
+	if idStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "error": "Id is required"})
+		return
+	}
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "error": "Invalid Id"})
+		return
+	}
+
+	row, details, err := LoadAdminRolesEditDetails(siteUsersId, id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "errors": []string{err.Error()}})
+		return
+	}
+
+	status := fmt.Sprint(row["Status"])
+	if status == "" {
+		status = "0"
+	}
+
+	errorsArr := []interface{}{}
+	if status != "1" {
+		if msg, ok := row["Errors"].(string); ok && strings.TrimSpace(msg) != "" {
+			errorsArr = append(errorsArr, gin.H{"fieldName": "General", "messageCode": msg})
+		}
+	}
+
+	metadata := GetAdminRolesCreateMetadata()
+
+	c.JSON(http.StatusOK, gin.H{
+		"status":   status,
+		"errors":   errorsArr,
+		"id":       toInt(row["Id"]),
+		"details":  details,
+		"metadata": metadata,
+	})
+}
+
+func PostAdminRolesModuleEdit(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+	addedBy := getAddedByFromToken(user)
+
+	var req AdminRoleEditRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Invalid JSON body"}})
+		return
+	}
+
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Invalid Id"}})
+		return
+	}
+	if req.Name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Name is required"}})
+		return
+	}
+	if !isValidAdminRoleLevel(req.Level) {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Invalid level"}})
+		return
+	}
+	if req.AccessRights == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"AccessRights is required"}})
+		return
+	}
+
+	dbRes, err := spEditAdminRole(siteUsersId, addedBy, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "errors": []string{err.Error()}})
+		return
+	}
+
+	metadata := GetAdminRolesCreateMetadata()
+
+	// Return SP response only (no extra GetEditDetails call)
+	roleID := dbRes.Id
+	if roleID <= 0 {
+		roleID = req.Id
+	}
+	details := NormalizeAdminRoleDetails(dbRes.Details)
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       roleID,
+		"details":  details,
+		"metadata": metadata,
+		"status":   dbRes.Status,
+		"errors":   dbRes.Errors,
 	})
 }

@@ -71,6 +71,14 @@ type AdminRoleCreateRequest struct {
 	AccessRights        []AccessRightNode   `json:"accessRights"`
 }
 
+type AdminRoleEditRequest struct {
+	Id           int               `json:"id"`
+	Name         string            `json:"name"`
+	BSuppressed  bool              `json:"bSuppressed"`
+	Level        string            `json:"level"`
+	AccessRights []AccessRightNode `json:"accessRights"`
+}
+
 // SP DbResultDto style row
 type DbResultRow struct {
 	Id      int         `json:"id"`

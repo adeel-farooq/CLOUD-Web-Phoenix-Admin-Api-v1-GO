@@ -177,7 +177,7 @@ func SendAuthError(c *gin.Context, errorType int) {
 		"errors":  errorMsg,
 	})
 }
-func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string) (string, string, int, int, error) {
+func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string, userCode string) (string, string, int, int, error) {
 	now := time.Now().UTC()
 
 	// Get JWT secret and expiry from environment
@@ -202,6 +202,7 @@ func GenerateTokens(userID int, rememberMe bool, firstName string, lastName stri
 		"firstName":   firstName,
 		"lastName":    lastName,
 		"accountType": accountType,
+		"userCode":    userCode,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	accessToken, err := token.SignedString([]byte(jwtSecret))
@@ -256,13 +257,16 @@ func ExtractUser(c *gin.Context) map[string]interface{} {
 	}
 
 	if v, ok := claims["firstName"].(string); ok {
-		user["firstName"] = v
+		user["FirstName"] = v
 	}
 	if v, ok := claims["lastName"].(string); ok {
-		user["lastName"] = v
+		user["LastName"] = v
 	}
 	if v, ok := claims["accountType"].(string); ok {
-		user["accountType"] = v
+		user["AccountType"] = v
+	}
+	if v, ok := claims["userCode"].(string); ok {
+		user["UserCode"] = v
 	}
 
 	if len(user) == 0 {
