@@ -658,3 +658,88 @@ func PostAdminRolesModuleEdit(c *gin.Context) {
 		"errors":   dbRes.Errors,
 	})
 }
+
+func idsToCDL(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	sb := strings.Builder{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(strconv.Itoa(id))
+	}
+	return sb.String()
+}
+
+func DeleteAdminRole(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status": "0",
+			"errors": []string{"Unauthorized"},
+		})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+	deletedBy := getAddedByFromToken(user)
+
+	// ✅ .NET style: POST body with ids
+	var req AdminRoleDeleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []string{"Invalid JSON body"},
+		})
+		return
+	}
+
+	if len(req.Ids) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []string{"Ids is required"},
+		})
+		return
+	}
+
+	// SP call (bulk)
+	dbRes, err := spDeleteAdminRoles(siteUsersId, deletedBy, req.Ids)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"errors": []string{err.Error()},
+		})
+		return
+	}
+
+	// ✅ Match .NET response shape exactly
+	details := DeleteDetails{
+		SuccessfulDeletions: []int{},
+		FailedDeletions:     []int{},
+	}
+	if dbRes.Details != nil {
+		details = parseDeleteDetails(dbRes.Details)
+	}
+
+	// Return same keys as SP output
+	spDetails := gin.H{
+		"SuccessfulDeletions": details.SuccessfulDeletions,
+	}
+	if len(details.FailedDeletions) > 0 {
+		spDetails["FailedDeletions"] = details.FailedDeletions
+	} else {
+		spDetails["FailedDeletions"] = []int{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":      nil,
+		"details": spDetails,
+		"status":  dbRes.Status,
+		"errors":  dbRes.Errors,
+	})
+}

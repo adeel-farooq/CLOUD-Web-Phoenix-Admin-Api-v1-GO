@@ -1275,3 +1275,99 @@ func BuildAccessRightsCDL(nodes []AccessRightNode) string {
 	}
 	return sb.String()
 }
+func spDeleteAdminRoles(siteUsersId int, deletedBy string, ids []int) (DbResultRow, error) {
+	idsCdl := idsToCDL(ids)
+	if strings.TrimSpace(idsCdl) == "" {
+		return DbResultRow{}, fmt.Errorf("ids are required")
+	}
+
+	// ✅ Replace with your real SP name from DB
+	sp := "v1_AdminRole_AdminRolesModule_Delete"
+
+	params := map[string]interface{}{
+		"IdsToDelete":      idsCdl, // common pattern
+		"User_SiteUsersID": siteUsersId,
+		"User_DeletedBy":   deletedBy, // some SPs use this
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, fmt.Errorf("invalid SP response")
+	}
+
+	return parseDbResultRow(row)
+}
+
+func parseDeleteDetails(details interface{}) DeleteDetails {
+	out := DeleteDetails{
+		SuccessfulDeletions: []int{},
+		FailedDeletions:     []int{},
+	}
+
+	// details could already be map (or JSON string)
+	var m map[string]interface{}
+	switch t := details.(type) {
+	case map[string]interface{}:
+		m = t
+	case string:
+		s := strings.TrimSpace(t)
+		if s != "" {
+			_ = json.Unmarshal([]byte(s), &m)
+			if m == nil {
+				clean := strings.ReplaceAll(s, "'", "\"")
+				_ = json.Unmarshal([]byte(clean), &m)
+			}
+		}
+	default:
+		// best-effort marshal/unmarshal
+		b, err := json.Marshal(details)
+		if err == nil {
+			_ = json.Unmarshal(b, &m)
+		}
+	}
+	if m == nil {
+		return out
+	}
+
+	// helper for []interface{} -> []int
+	toIntSlice := func(v interface{}) []int {
+		arr := []int{}
+		raw, ok := v.([]interface{})
+		if !ok || raw == nil {
+			return arr
+		}
+		for _, it := range raw {
+			switch t := it.(type) {
+			case int:
+				arr = append(arr, t)
+			case int64:
+				arr = append(arr, int(t))
+			case float64:
+				arr = append(arr, int(t))
+			default:
+				i, err := strconv.Atoi(fmt.Sprint(t))
+				if err == nil {
+					arr = append(arr, i)
+				}
+			}
+		}
+		return arr
+	}
+
+	if v, ok := m["successfulDeletions"]; ok {
+		out.SuccessfulDeletions = toIntSlice(v)
+	} else if v, ok := m["SuccessfulDeletions"]; ok {
+		out.SuccessfulDeletions = toIntSlice(v)
+	}
+	if v, ok := m["failedDeletions"]; ok {
+		out.FailedDeletions = toIntSlice(v)
+	} else if v, ok := m["FailedDeletions"]; ok {
+		out.FailedDeletions = toIntSlice(v)
+	}
+	return out
+}

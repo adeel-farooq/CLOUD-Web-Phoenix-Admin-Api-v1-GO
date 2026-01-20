@@ -18,5 +18,6 @@ func RegisterAdminRoutes(router *gin.RouterGroup) {
 	router.POST("/adminrolesmodule/create", admin.PostCreateAdminRole)
 	router.GET("/adminrolesmodule/edit", admin.GetAdminRolesEditDetails)
 	router.POST("/adminrolesmodule/edit", admin.PostAdminRolesModuleEdit)
+	router.POST("/adminrolesmodule/delete", admin.DeleteAdminRole)
 
 }

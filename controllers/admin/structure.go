@@ -102,3 +102,11 @@ type FormMeta struct {
 	Editable          bool        `json:"editable"`
 	BFilterable       bool        `json:"bFilterable"`
 }
+type AdminRoleDeleteRequest struct {
+	Ids []int `json:"idsToDelete"` // frontend payload: {"ids":[1030,1031,1032]}
+}
+
+type DeleteDetails struct {
+	SuccessfulDeletions []int `json:"successfulDeletions"`
+	FailedDeletions     []int `json:"failedDeletions"`
+}
