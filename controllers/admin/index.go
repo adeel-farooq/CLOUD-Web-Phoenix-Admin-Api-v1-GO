@@ -1,8 +1,11 @@
 package admin
 
 import (
+	"bytes"
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 
 	"cloud-web-phoenix-customer-v1-go/db"
@@ -12,6 +15,44 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func jsonBindErrorMessages(err error) []string {
+	if err == nil {
+		return []string{"Invalid JSON body"}
+	}
+
+	var syntaxErr *json.SyntaxError
+	if errors.As(err, &syntaxErr) {
+		return []string{fmt.Sprintf("Invalid JSON syntax at position %d", syntaxErr.Offset)}
+	}
+
+	var unmarshalTypeErr *json.UnmarshalTypeError
+	if errors.As(err, &unmarshalTypeErr) {
+		field := strings.TrimSpace(unmarshalTypeErr.Field)
+		if field == "" {
+			field = "(unknown field)"
+		}
+		expected := ""
+		if unmarshalTypeErr.Type != nil {
+			expected = unmarshalTypeErr.Type.String()
+		}
+		if expected != "" {
+			return []string{fmt.Sprintf("Invalid type for '%s': got %s, expected %s", field, unmarshalTypeErr.Value, expected)}
+		}
+		return []string{fmt.Sprintf("Invalid type for '%s': got %s", field, unmarshalTypeErr.Value)}
+	}
+
+	if errors.Is(err, io.EOF) {
+		return []string{"Request body is empty"}
+	}
+
+	msg := err.Error()
+	if strings.HasPrefix(msg, "json: unknown field ") {
+		return []string{msg}
+	}
+
+	return []string{msg}
+}
 
 func GetUserCounts(c *gin.Context) {
 
@@ -659,23 +700,6 @@ func PostAdminRolesModuleEdit(c *gin.Context) {
 	})
 }
 
-func idsToCDL(ids []int) string {
-	if len(ids) == 0 {
-		return ""
-	}
-	sb := strings.Builder{}
-	for _, id := range ids {
-		if id <= 0 {
-			continue
-		}
-		if sb.Len() > 0 {
-			sb.WriteString(",")
-		}
-		sb.WriteString(strconv.Itoa(id))
-	}
-	return sb.String()
-}
-
 func DeleteAdminRole(c *gin.Context) {
 	user := auth.ExtractUser(c)
 	if user == nil {
@@ -741,5 +765,142 @@ func DeleteAdminRole(c *gin.Context) {
 		"details": spDetails,
 		"status":  dbRes.Status,
 		"errors":  dbRes.Errors,
+	})
+}
+func GetCreateAdminUser(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status": "0",
+			"errors": []string{"Unauthorized"},
+		})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+
+	// optional query: AdminRolesId
+	var adminRolesId *int
+	if s := strings.TrimSpace(c.Query("AdminRolesId")); s != "" {
+		v, err := strconv.Atoi(s)
+		if err != nil || v <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"status": "0",
+				"errors": []string{"Invalid AdminRolesId"},
+			})
+			return
+		}
+		adminRolesId = &v
+	}
+
+	// SP call
+	dbRes, err := spGetAdminUserCreateDetails(adminRolesId)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"errors": []string{err.Error()},
+		})
+		return
+	}
+
+	metadata := GetAdminUsersModuleMetadata()
+	details := NormalizeAdminUserCreateDetails(dbRes.Details)
+	details["siteUsersId"] = siteUsersId
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       0,
+		"details":  details,
+		"metadata": metadata,
+		"status":   dbRes.Status,
+		"errors":   dbRes.Errors,
+	})
+}
+func PostCreateAdminUser(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"status": "0",
+			"errors": []string{"Unauthorized"},
+		})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+	addedBy := getAddedByFromToken(user)
+
+	var req AdminUserCreateRequest
+	body, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []string{"Unable to read request body"},
+		})
+		return
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": jsonBindErrorMessages(err),
+		})
+		return
+	}
+	// Ensure there's only one JSON value in body
+	if err := dec.Decode(&struct{}{}); err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []string{"Request body must contain a single JSON object"},
+		})
+		return
+	}
+
+	// ---- Basic validation (frontend fields) ----
+	req.Title = strings.TrimSpace(req.Title)
+	req.FirstName = strings.TrimSpace(req.FirstName)
+	req.LastName = strings.TrimSpace(req.LastName)
+	req.EmailAddress = strings.TrimSpace(req.EmailAddress)
+	req.JobTitle = strings.TrimSpace(req.JobTitle)
+	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+
+	if req.FirstName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"FirstName is required"}})
+		return
+	}
+	if req.LastName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"LastName is required"}})
+		return
+	}
+	if req.EmailAddress == "" || !strings.Contains(req.EmailAddress, "@") {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"Valid EmailAddress is required"}})
+		return
+	}
+
+	// accessRights payload required (frontend bhej raha hai)
+	if req.AccessRights == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"status": "0", "errors": []string{"AccessRights is required"}})
+		return
+	}
+
+	// ---- Create SP ----
+	dbRes, err := spCreateAdminUser(siteUsersId, addedBy, req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"errors": []string{err.Error()},
+		})
+		return
+	}
+
+	metadata := GetAdminUsersModuleMetadata()
+	details := NormalizeAdminUserCreateDetails(dbRes.Details)
+	details["siteUsersId"] = siteUsersId
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       dbRes.Id,
+		"details":  details,
+		"metadata": metadata,
+		"status":   dbRes.Status,
+		"errors":   dbRes.Errors,
 	})
 }

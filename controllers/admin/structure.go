@@ -110,3 +110,23 @@ type DeleteDetails struct {
 	SuccessfulDeletions []int `json:"successfulDeletions"`
 	FailedDeletions     []int `json:"failedDeletions"`
 }
+
+type AdminUserCreateRequest struct {
+	Id             int               `json:"id"`
+	SiteUsersId    int               `json:"siteUsersId"` // frontend sends 0; we ignore and use token site user
+	Title          string            `json:"title"`
+	FirstName      string            `json:"firstName"`
+	LastName       string            `json:"lastName"`
+	UserName       string            `json:"userName"` // optional; if empty we default to emailAddress
+	EmailAddress   string            `json:"emailAddress"`
+	JobTitle       string            `json:"jobTitle"`
+	PhoneNumber    string            `json:"phoneNumber"`
+	BSuppressed    bool              `json:"bSuppressed"`
+	AdminRolesId   *int              `json:"adminRolesId"`   // nullable
+	ListAdminRoles []KV              `json:"listAdminRoles"` // frontend sends this too; SP usually ignores
+	AccessRights   []AccessRightNode `json:"accessRights"`
+}
+type KV struct {
+	Label string `json:"label"`
+	Value int    `json:"value"`
+}

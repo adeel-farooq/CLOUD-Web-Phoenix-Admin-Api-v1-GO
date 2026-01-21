@@ -1371,3 +1371,317 @@ func parseDeleteDetails(details interface{}) DeleteDetails {
 	}
 	return out
 }
+func spGetAdminUserCreateDetails(adminRolesId *int) (DbResultRow, error) {
+	sp := "v1_AdminRole_AdminUsersModule_GetCreateDetails"
+
+	params := map[string]interface{}{
+		"AdminRolesId": nil,
+	}
+	if adminRolesId != nil {
+		params["AdminRolesId"] = *adminRolesId
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 1)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, fmt.Errorf("invalid SP response")
+	}
+
+	return parseDbResultRow(row)
+}
+func GetAdminUsersModuleMetadata() []map[string]interface{} {
+	// .NET-aligned AdminUsers create/edit form metadata
+	return []map[string]interface{}{
+		{
+			"name": "Title", "type": "String", "customType": nil, "label": "Title",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "FirstName", "type": "String", "customType": nil, "label": "First Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "LastName", "type": "String", "customType": nil, "label": "Last Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "EmailAddress", "type": "String", "customType": nil, "label": "Email Address",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "JobTitle", "type": "String", "customType": nil, "label": "Job Title",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "PhoneNumber", "type": "String", "customType": nil, "label": "Phone Number",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "bSuppressed", "type": "Boolean", "customType": nil, "label": "Suppressed",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AdminRolesId", "type": "SingleSelect", "customType": nil, "label": "Admin Role",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": "listAdminRoles",
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AccessRights", "type": "AccessRights", "customType": nil, "label": "Access Rights",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+	}
+}
+
+// NormalizeAdminUserCreateDetails ensures a stable details shape for AdminUsersModule_GetCreateDetails.
+// It guarantees presence of listAdminRoles and accessRights keys and fixes nested JSON strings.
+func NormalizeAdminUserCreateDetails(details interface{}) map[string]interface{} {
+	base := map[string]interface{}{}
+
+	// Parse to map
+	switch t := details.(type) {
+	case map[string]interface{}:
+		base = t
+	case string:
+		parsed, err := ParseAndFixNestedJSON(t)
+		if err == nil {
+			base = parsed
+		}
+	default:
+		b, err := json.Marshal(details)
+		if err == nil {
+			_ = json.Unmarshal(b, &base)
+		}
+	}
+
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+
+	// Fix nested JSON (e.g., AccessRights / ChildElements as string)
+	if fixedAny := fixNestedJSON(base); fixedAny != nil {
+		if fixedMap, ok := fixedAny.(map[string]interface{}); ok && fixedMap != nil {
+			base = fixedMap
+		}
+	}
+
+	// Normalize common scalar fields to frontend camelCase model keys
+	// and delete their PascalCase variants to avoid duplicates.
+	if v, ok := base["Id"]; ok {
+		if _, has := base["id"]; !has {
+			base["id"] = toInt(v)
+		}
+		delete(base, "Id")
+	}
+	if v, ok := base["Title"]; ok {
+		if _, has := base["title"]; !has {
+			base["title"] = v
+		}
+		delete(base, "Title")
+	}
+	if v, ok := base["FirstName"]; ok {
+		if _, has := base["firstName"]; !has {
+			base["firstName"] = v
+		}
+		delete(base, "FirstName")
+	}
+	if v, ok := base["LastName"]; ok {
+		if _, has := base["lastName"]; !has {
+			base["lastName"] = v
+		}
+		delete(base, "LastName")
+	}
+	if v, ok := base["EmailAddress"]; ok {
+		if _, has := base["emailAddress"]; !has {
+			base["emailAddress"] = v
+		}
+		delete(base, "EmailAddress")
+	}
+	if v, ok := base["PhoneNumber"]; ok {
+		if _, has := base["phoneNumber"]; !has {
+			base["phoneNumber"] = v
+		}
+		delete(base, "PhoneNumber")
+	}
+	if v, ok := base["JobTitle"]; ok {
+		if _, has := base["jobTitle"]; !has {
+			base["jobTitle"] = v
+		}
+		delete(base, "JobTitle")
+	}
+	if v, ok := base["AdminRolesId"]; ok {
+		if _, has := base["adminRolesId"]; !has {
+			base["adminRolesId"] = v
+		}
+		delete(base, "AdminRolesId")
+	}
+	if v, ok := base["bSuppressed"]; ok {
+		// Keep key as-is; just normalize type
+		base["bSuppressed"] = toBool(v)
+	}
+	if v, ok := base["BSuppressed"]; ok {
+		if _, has := base["bSuppressed"]; !has {
+			base["bSuppressed"] = toBool(v)
+		}
+		delete(base, "BSuppressed")
+	}
+
+	// listAdminRoles (normalize casing)
+	if v, ok := base["listAdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["ListAdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["AdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["adminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else {
+		base["listAdminRoles"] = []interface{}{}
+	}
+	// prevent duplicate casing keys in response
+	delete(base, "ListAdminRoles")
+	delete(base, "AdminRoles")
+	delete(base, "adminRoles")
+
+	// accessRights (normalize casing and shape)
+	var rights interface{}
+	if v, ok := base["accessRights"]; ok {
+		rights = v
+	} else if v, ok := base["AccessRights"]; ok {
+		rights = v
+	} else {
+		rights = []interface{}{}
+	}
+	delete(base, "AccessRights")
+
+	// If rights come in SP PascalCase tree, rename to frontend tree
+	base["accessRights"] = renameAccessTree(rights)
+
+	// Ensure stable model keys exist (even if nil) to match .NET payload expectations.
+	ensure := func(k string, def interface{}) {
+		if _, ok := base[k]; !ok {
+			base[k] = def
+		}
+	}
+	ensure("id", 0)
+	ensure("title", nil)
+	ensure("firstName", nil)
+	ensure("lastName", nil)
+	ensure("emailAddress", nil)
+	ensure("jobTitle", nil)
+	ensure("phoneNumber", nil)
+	ensure("adminRolesId", nil)
+	ensure("bSuppressed", false)
+	ensure("siteUsersId", nil)
+	ensure("listAdminRoles", []interface{}{})
+	ensure("accessRights", []interface{}{})
+
+	return base
+}
+
+// IMPORTANT: SP name yahan set karo (agar tumhare DB me different ho)
+func spCreateAdminUser(siteUsersId int, addedBy string, req AdminUserCreateRequest) (DbResultRow, error) {
+	accessCdl := BuildAccessRightsCDL(req.AccessRights)
+
+	userName := strings.TrimSpace(req.EmailAddress)
+	if userName == "" {
+		userName = strings.TrimSpace(req.UserName)
+	}
+
+	sp := "v1_AdminRole_AdminUsersModule_Create"
+
+	// ---- Params mapping (SQL param names yahan match karna hota hai) ----
+	// Tumhare DB me params ho sakte hain:
+	// @Title, @FirstName, @LastName, @EmailAddress, @JobTitle, @PhoneNumber, @bSuppressed, @AdminRolesId, @AccessRightsCdl, @User_SiteUsersID, @User_AddedBy
+	params := map[string]interface{}{
+		"Title":           req.Title,
+		"FirstName":       req.FirstName,
+		"LastName":        req.LastName,
+		"UserName":        userName,
+		"EmailAddress":    req.EmailAddress,
+		"JobTitle":        req.JobTitle,
+		"PhoneNumber":     req.PhoneNumber,
+		"bSuppressed":     req.BSuppressed,
+		"AdminRolesId":    req.AdminRolesId, // nullable ok
+		"AccessRightsCdl": accessCdl,
+
+		"User_SiteUsersID": siteUsersId,
+		"User_AddedBy":     addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+
+	return parseDbResultRow(rows[0])
+}
+
+// Full details (to match .NET "bigger details payload")
+func LoadAdminUsersEditDetails(siteUsersId int, id int) (DbResultRow, interface{}, error) {
+	sp := "v1_AdminRole_AdminUsersModule_GetEditDetails"
+
+	params := map[string]interface{}{
+		"User_SiteUsersID": siteUsersId,
+		"Id":               id,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, nil, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, nil, fmt.Errorf("invalid SP response")
+	}
+
+	dbRes, err := parseDbResultRow(row)
+	if err != nil {
+		return DbResultRow{}, nil, err
+	}
+
+	// dbRes.Details already parsed JSON (object/array)
+	return dbRes, dbRes.Details, nil
+}
+func idsToCDL(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	sb := strings.Builder{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(strconv.Itoa(id))
+	}
+	return sb.String()
+}
