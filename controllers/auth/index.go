@@ -111,10 +111,11 @@ func SignIn(c *gin.Context) {
 		// ---------- Generate Tokens ----------
 		firstName, _ := result["FirstName"].(string)
 		lastName, _ := result["LastName"].(string)
+		userCode, _ := result["UserCode"].(string)
 		accountType := "Admin"
 
 		accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err :=
-			GenerateTokens(id, requestBody.RememberMe, firstName, lastName, accountType)
+			GenerateTokens(id, requestBody.RememberMe, firstName, lastName, accountType, userCode)
 
 		if err != nil {
 			SendAuthError(c, 0)
