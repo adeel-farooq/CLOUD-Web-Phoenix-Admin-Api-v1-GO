@@ -1685,3 +1685,72 @@ func idsToCDL(ids []int) string {
 	}
 	return sb.String()
 }
+func LoadListSelections(siteUsersId int, listKey string) *ListSelections {
+
+	spName := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+
+	params := map[string]interface{}{
+		"SiteUsersId": siteUsersId,
+		"TrackingId":  "DefaultTrackingID",
+		"ListKey":     listKey,
+	}
+
+	// .NET: Execute SP
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		return nil
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		return nil
+	}
+
+	// .NET: Map DB row → ListSelections DTO
+	return &ListSelections{
+		SortString:           toString(row["SortString"]),
+		FilterString:         toString(row["FilterString"]),
+		FullTextSearchString: toString(row["FullTextSearchString"]),
+		CustomColumnsString:  toString(row["CustomColumnsString"]),
+		PageNumber:           toInt(row["PageNumber"]),
+		PageSize:             toInt(row["PageSize"]),
+	}
+}
+
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "<nil>" {
+			return ""
+		}
+		return s
+	}
+}
+
+func AsRows(res interface{}) []map[string]interface{} {
+	if res == nil {
+		return []map[string]interface{}{}
+	}
+
+	// already correct type
+	if rows, ok := res.([]map[string]interface{}); ok {
+		return rows
+	}
+
+	return []map[string]interface{}{}
+}
+func AsSingleRow(res interface{}) (map[string]interface{}, bool) {
+	rows := AsRows(res)
+	if len(rows) == 0 {
+		return nil, false
+	}
+	return rows[0], true
+}
