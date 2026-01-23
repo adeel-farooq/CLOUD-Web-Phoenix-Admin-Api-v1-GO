@@ -916,7 +916,7 @@ func GetOutboundTransferList(c *gin.Context) {
 	q := ParseQueryRecordList(c.Request.URL.Query())
 
 	// 🔹 Load saved selections (same as .NET)
-	ex := loadListSelections(siteUsersId, "OutboundTransfers")
+	ex := LoadListSelections(siteUsersId, "OutboundTransfers")
 	OverrideWithSelections(&q, ex)
 
 	// 🔹 Endpoint config
