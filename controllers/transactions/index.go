@@ -1,6 +1,7 @@
 package transactions
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -290,4 +291,178 @@ func ListAll(c *gin.Context) {
 	}
 
 	respond(columns, listData, total)
+}
+
+func TransactionDetails(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "Authorization", "messageCode": "Unauthorized"},
+			},
+		})
+		return
+	}
+
+	// .NET expects: ?transactionsId=123
+	transactionsIdStr := c.Query("transactionsId")
+	if transactionsIdStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "transactionsId", "messageCode": "Required"},
+			},
+		})
+		return
+	}
+
+	transactionsId, err := strconv.Atoi(transactionsIdStr)
+	if err != nil || transactionsId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "transactionsId", "messageCode": "Invalid"},
+			},
+		})
+		return
+	}
+
+	// Call the same SP as .NET DB client:
+	// v2_AdminRole_TransactionsModule_GetTransactionDetails
+	res, err := auth.ExecSP(
+		db.DB,
+		"v2_AdminRole_TransactionsModule_GetTransactionDetails",
+		map[string]interface{}{
+			"SiteUsersId":                         user["id"],
+			"CustomerAssetAccountsTransactionsId": transactionsId,
+		},
+		1,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "transactionsId", "messageCode": "SP_Error"},
+			},
+		})
+		return
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "", "messageCode": "Invalid_SP_Response"},
+			},
+		})
+		return
+	}
+
+	// Details is JSON string in SQL result (same pattern as your other endpoints)
+	var details map[string]interface{}
+	if detailsStr, ok := row["Details"].(string); ok && detailsStr != "" {
+		_ = json.Unmarshal([]byte(detailsStr), &details)
+	}
+
+	// .NET returns:
+	// { "Id": <int>, "Details": <object>, "Metadata": <array>, "Status": "1|0", "Errors": [...] }
+	// (But your project generally uses lowercase keys. You can switch keys if your frontend expects lowercase.)
+	c.JSON(http.StatusOK, gin.H{
+		"id":       row["Id"],
+		"details":  details,
+		"metadata": TransactionDetailsMetadata,
+		"status":   row["Status"],
+		"errors":   []interface{}{},
+	})
+}
+
+func ViewAlerts(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	// .NET uses query param "Id"
+	idStr := c.Query("Id")
+	if idStr == "" {
+		idStr = c.Query("id")
+	}
+
+	transactionsId := 0
+	if idStr != "" {
+		n, err := strconv.Atoi(idStr)
+		if err != nil || n < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"id":      0,
+				"details": nil,
+				"status":  "0",
+				"errors": []gin.H{
+					{"fieldName": "Id", "messageCode": "Invalid"},
+				},
+			})
+			return
+		}
+		transactionsId = n
+	}
+
+	res, err := auth.ExecSP(
+		db.DB,
+		"v1_AdminRole_TransactionsModule_ViewAlerts",
+		map[string]interface{}{
+			"TransactionsId": transactionsId,
+			"SiteUsersID":    user["id"],
+		},
+		1,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "Id", "messageCode": "SP_Error"},
+			},
+		})
+		return
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"id":      0,
+			"details": nil,
+			"status":  "0",
+			"errors": []gin.H{
+				{"fieldName": "", "messageCode": "Invalid_SP_Response"},
+			},
+		})
+		return
+	}
+
+	// Details from SP is usually JSON string
+	var details map[string]interface{}
+	if s, ok := row["Details"].(string); ok && s != "" {
+		_ = json.Unmarshal([]byte(s), &details)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":       row["Id"],
+		"details":  details,
+		"metadata": ViewAlertsMetadata,
+		"status":   row["Status"],
+		"errors":   []interface{}{},
+	})
 }

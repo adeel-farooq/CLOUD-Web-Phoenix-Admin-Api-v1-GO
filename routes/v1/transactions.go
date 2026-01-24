@@ -11,6 +11,8 @@ func RegisterTransactionRoutes(router *gin.RouterGroup) {
 	// [Route("api/v1/adminrole/transactionsmodule")]
 	router.GET("/transactionsmodule/list", transactions.List)
 	router.GET("/transactionsmodule/listall", transactions.ListAll)
+	router.GET("/transactionsmodule/transaction-details", transactions.TransactionDetails)
+	router.GET("/transactionsmodule/view-alerts", transactions.ViewAlerts)
 
 	// We'll add next endpoints here one-by-one:
 	// router.POST("/transactionsmodule/downloadall", transactions.DownloadAll)
