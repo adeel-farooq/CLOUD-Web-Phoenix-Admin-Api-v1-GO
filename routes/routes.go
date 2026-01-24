@@ -15,4 +15,5 @@ func RegisterRoutes(api *gin.RouterGroup) {
 	admin := api.Group("/v1/adminrole")
 	v1.RegisterAdminRoutes(admin)
 	v1.RegisterDashboardRoutes(admin)
+	v1.RegisterTransactionRoutes(admin)
 }
