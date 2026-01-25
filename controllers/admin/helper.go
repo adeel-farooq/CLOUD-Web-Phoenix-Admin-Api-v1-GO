@@ -272,9 +272,16 @@ func ConvertSearchToSQL(search string, fields []string) string {
 
 	orParts := []string{}
 	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
 		orParts = append(orParts, f+" LIKE '%"+s+"%'")
 	}
-	return "WHERE (" + strings.Join(orParts, " OR ") + ")"
+	if len(orParts) == 0 {
+		return ""
+	}
+	return " AND (" + strings.Join(orParts, " OR ") + ")"
 }
 
 // --------------------

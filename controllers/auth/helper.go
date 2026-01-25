@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,42 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+func orderedSPParamKeys(params map[string]interface{}) []string {
+	// Prefer a stable, .NET-like order for common list stored procedures.
+	preferred := []string{
+		"PageSize",
+		"ListKey",
+		"RawFilterString",
+		"Filters",
+		"SortBy",
+		"TrackingID",
+		"RawSortString",
+		"RawSearchString",
+		"User_SiteUsersID",
+		"PageNumber",
+		"SearchString",
+	}
+
+	seen := make(map[string]bool, len(params))
+	keys := make([]string, 0, len(params))
+	for _, k := range preferred {
+		if _, ok := params[k]; ok {
+			keys = append(keys, k)
+			seen[k] = true
+		}
+	}
+
+	rest := make([]string, 0, len(params))
+	for k := range params {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	keys = append(keys, rest...)
+	return keys
+}
 
 const KeySize = 32 // 256-bit
 
@@ -94,7 +131,7 @@ func ValidateTfaCode(tfaType string, tfaCode string, authData map[string]interfa
 			return Success
 		}
 		return TfaCodeInvalid
-	} else if tfaType != "SMS" || tfaType != "AuthenticatorApp" {
+	} else if tfaType != "SMS" && tfaType != "AuthenticatorApp" {
 		return TfaTypeInvalid
 
 	}
@@ -289,40 +326,45 @@ func ExecSP(
 	query := "exec " + spName
 	args := []interface{}{}
 
-	i := 0
-	for k := range params {
+	keys := orderedSPParamKeys(params)
+	for i, k := range keys {
 		if i == 0 {
 			query += " "
 		} else {
 			query += ", "
 		}
 		query += "@" + k + " = @" + k
-		i++
-	}
-
-	for k, v := range params {
-		args = append(args, sql.Named(k, v))
+		args = append(args, sql.Named(k, params[k]))
 	}
 
 	// ---------- LOG (Before Execution) ----------
 	finalQuery := "exec " + spName
-	i = 0
-	for k, v := range params {
+	for i, k := range keys {
+		v := params[k]
 		if i == 0 {
 			finalQuery += " "
 		} else {
 			finalQuery += ","
 		}
 		finalQuery += "@" + k + "="
+		if v == nil {
+			finalQuery += "null"
+			continue
+		}
 		switch val := v.(type) {
 		case string:
 			finalQuery += "'" + val + "'"
 		case int, int64, float64:
 			finalQuery += fmt.Sprintf("%v", val)
+		case bool:
+			if val {
+				finalQuery += "1"
+			} else {
+				finalQuery += "0"
+			}
 		default:
 			finalQuery += fmt.Sprintf("'%v'", val)
 		}
-		i++
 	}
 
 	pkg.Log("[SP CALL]", finalQuery)

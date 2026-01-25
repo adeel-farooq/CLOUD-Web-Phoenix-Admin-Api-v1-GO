@@ -9,5 +9,6 @@ import (
 func RegisterTransferRoutes(router *gin.RouterGroup) {
 
 	router.GET("/transfersmodule/outboundtransferlist", transfer.GetOutboundTransferList)
+	router.GET("/unappliedtransfersmodule/list", transfer.GetUnAppliedTransfersList)
 
 }

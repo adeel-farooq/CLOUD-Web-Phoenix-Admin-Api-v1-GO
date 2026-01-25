@@ -142,7 +142,7 @@ func undoMigration(db *sql.DB, dir, fname string) error {
 
 func main() {
 	flag.Usage = func() {
-		fmt.Println(`Usage:
+		fmt.Print(`Usage:
   create <name>         Create new migration
   status                Show applied/pending migrations
   up [file]             Apply all or specific migration
