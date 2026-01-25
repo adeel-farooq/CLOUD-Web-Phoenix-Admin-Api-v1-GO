@@ -294,18 +294,17 @@ func ExtractUser(c *gin.Context) map[string]interface{} {
 	}
 
 	if v, ok := claims["firstName"].(string); ok {
-		user["FirstName"] = v
+		user["firstName"] = v
 	}
 	if v, ok := claims["lastName"].(string); ok {
-		user["LastName"] = v
+		user["lastName"] = v
 	}
 	if v, ok := claims["accountType"].(string); ok {
-		user["AccountType"] = v
+		user["accountType"] = v
 	}
 	if v, ok := claims["userCode"].(string); ok {
-		user["UserCode"] = v
+		user["userCode"] = v
 	}
-
 	if len(user) == 0 {
 		return nil
 	}

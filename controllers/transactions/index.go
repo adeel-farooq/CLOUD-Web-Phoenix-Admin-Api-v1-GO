@@ -53,8 +53,8 @@ func List(c *gin.Context) {
 		q.PageSize = 200
 	}
 
-	// .NET: load list selections for this endpoint
-	// .NET uses ListKey: "Admin_CustomerAssetAccounts"
+	// .NET list selections key for this endpoint:
+	// "Admin_CustomerAssetAccounts"
 	loadSelections := func() *admin.ListSelections {
 		sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
 		params := map[string]interface{}{
@@ -77,9 +77,6 @@ func List(c *gin.Context) {
 	ex := loadSelections()
 	admin.OverrideWithSelections(&q, ex)
 
-	// Endpoint-specific whitelist for filtering/sorting/search
-	// (These table/field names are best-guess based on DTO; if your SP expects different aliases,
-	// we’ll adjust after first run using SP logs)
 	cfg := admin.ListSPConfig{
 		ListKey:    "Admin_CustomerAssetAccounts",
 		TrackingID: "DefaultTrackingID",
@@ -108,24 +105,25 @@ func List(c *gin.Context) {
 	// ✅ additional param required by this list:
 	spParams["CustomerAssetAccountsID"] = customerAssetAccountsId
 
-	// Call same SP as .NET
 	spName := "v1_AdminRole_TransactionsModule_GetTransactionList"
 	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
 
-	respond := func(columns []map[string]interface{}, listData []map[string]interface{}, total int) {
+	respond := func(listData []map[string]interface{}, total int) {
+		// ✅ Path B: static columns EXACT like .NET
+		columns := ColumnsTransactionsList()
+
 		details := admin.BuildListDetails(columns, listData, q, total)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "1",
 			"id":      siteUsersId,
-			"errors":  []string{},
+			"errors":  []interface{}{},
 			"details": details,
 		})
 	}
 
 	if err != nil {
-		// return empty list if no rows (same pattern used in admin module)
 		if err.Error() == "sql: no rows in result set" {
-			respond([]map[string]interface{}{}, []map[string]interface{}{}, 0)
+			respond([]map[string]interface{}{}, 0)
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -144,24 +142,20 @@ func List(c *gin.Context) {
 		return
 	}
 
-	// If SP returns no rows
 	if len(rows) == 0 {
-		respond([]map[string]interface{}{}, []map[string]interface{}{}, 0)
+		respond([]map[string]interface{}{}, 0)
 		return
 	}
 
-	// Build columns automatically from first row (so frontend gets columns)
-	columns := admin.BuildColumnsFromSPRow(rows[0], 1)
-
-	// Normalize row keys to match the repo style (.NET camelCase output)
+	// Normalize row keys to match .NET listData keys (lowerCamel)
 	listData := make([]map[string]interface{}, 0, len(rows))
 	total := 0
 
 	for _, row := range rows {
 		item := admin.NormalizeRowKeys(row)
+		FormatMoneyFields2dp(item)
 		listData = append(listData, item)
 
-		// total count (HowManyResults)
 		if v, ok := row["HowManyResults"]; ok && v != nil {
 			switch t := v.(type) {
 			case int:
@@ -179,7 +173,7 @@ func List(c *gin.Context) {
 		}
 	}
 
-	respond(columns, listData, total)
+	respond(listData, total)
 }
 
 func ListAll(c *gin.Context) {
@@ -223,10 +217,8 @@ func ListAll(c *gin.Context) {
 	cfg := admin.ListSPConfig{
 		ListKey:      "Admin_GetAllTransactions",
 		TrackingID:   "DefaultTrackingID",
-		ColumnMap:    map[string]string{}, // we’ll tighten this once we see actual row keys
-		SearchFields: []string{
-			// add later once confirmed
-		},
+		ColumnMap:    map[string]string{},
+		SearchFields: []string{},
 	}
 
 	spParams := admin.BuildListSPParams(q, siteUsersId, cfg)
@@ -234,43 +226,51 @@ func ListAll(c *gin.Context) {
 	spName := "v1_AdminRole_TransactionsModule_GetAllTransactionsList"
 	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
 
-	respond := func(columns []map[string]interface{}, listData []map[string]interface{}, total int) {
+	respond := func(listData []map[string]interface{}, total int) {
+		// ✅ Path B: static columns EXACT like .NET
+		columns := ColumnsTransactionsListAll()
+
 		details := admin.BuildListDetails(columns, listData, q, total)
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "1",
 			"id":      siteUsersId,
-			"errors":  []string{},
+			"errors":  []interface{}{},
 			"details": details,
 		})
 	}
 
 	if err != nil {
 		if err.Error() == "sql: no rows in result set" {
-			respond([]map[string]interface{}{}, []map[string]interface{}{}, 0)
+			respond([]map[string]interface{}{}, 0)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
 		return
 	}
 
 	rows, ok := res.([]map[string]interface{})
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": "Invalid SP response"})
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  "Invalid SP response",
+		})
 		return
 	}
 
 	if len(rows) == 0 {
-		respond([]map[string]interface{}{}, []map[string]interface{}{}, 0)
+		respond([]map[string]interface{}{}, 0)
 		return
 	}
-
-	columns := admin.BuildColumnsFromSPRow(rows[0], 1)
 
 	listData := make([]map[string]interface{}, 0, len(rows))
 	total := 0
 
 	for _, row := range rows {
 		item := admin.NormalizeRowKeys(row)
+		FormatMoneyFields2dp(item)
 		listData = append(listData, item)
 
 		if v, ok := row["HowManyResults"]; ok && v != nil {
@@ -290,7 +290,7 @@ func ListAll(c *gin.Context) {
 		}
 	}
 
-	respond(columns, listData, total)
+	respond(listData, total)
 }
 
 func TransactionDetails(c *gin.Context) {
