@@ -12,8 +12,9 @@ func RegisterRoutes(api *gin.RouterGroup) {
 	v1.RegisterAuthRoutes(auth)
 
 	// Admin routes
-	admin := api.Group("/v1/adminrole")
-	v1.RegisterAdminRoutes(admin)
-	v1.RegisterDashboardRoutes(admin)
-	v1.RegisterTransferRoutes(admin)
+	adminrole := api.Group("/v1/adminrole")
+	v1.RegisterAdminRoutes(adminrole)
+	v1.RegisterDashboardRoutes(adminrole)
+	v1.RegisterBusinessRoutes(adminrole)
+
 }
