@@ -32,6 +32,7 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(pkg.CORSMiddleware())
 	r.Use(pkg.RecoveryWithLogger())
 
 	r.GET("/", func(c *gin.Context) {
