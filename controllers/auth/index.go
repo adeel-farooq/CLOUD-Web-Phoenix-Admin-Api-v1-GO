@@ -2,6 +2,7 @@ package auth
 
 import (
 	"cloud-web-phoenix-customer-v1-go/db"
+	"time"
 
 	"net/http"
 
@@ -69,76 +70,6 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	// ---------- TFA FLOW ----------
-	if requestBody.TFAType != "" && requestBody.TFACode != "" {
-
-		var secret string
-		if v, ok := result["TotpSharedSecret"]; ok && v != nil {
-			switch s := v.(type) {
-			case string:
-				secret = s
-			case []byte:
-				secret = string(s)
-			default:
-				SendAuthError(c, 2)
-				return
-			}
-		} else {
-			SendAuthError(c, 2)
-			return
-		}
-
-		status := ValidateTfaCode(
-			requestBody.TFAType,
-			requestBody.TFACode,
-			map[string]interface{}{
-				"bTwoFactorAppAuthEnabled": result["bTwoFactorAppAuthEnabled"],
-				"bTwoFactorSMSAuthEnabled": result["bTwoFactorSMSAuthEnabled"],
-			},
-			true,
-			secret,
-		)
-
-		if status == TfaTypeInvalid {
-			SendAuthError(c, 2)
-			return
-		}
-		if status != Success {
-			SendAuthError(c, 1)
-			return
-		}
-
-		// ---------- Generate Tokens ----------
-		firstName, _ := result["FirstName"].(string)
-		lastName, _ := result["LastName"].(string)
-		userCode, _ := result["UserCode"].(string)
-		accountType := "Admin"
-
-		accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err :=
-			GenerateTokens(id, requestBody.RememberMe, firstName, lastName, accountType, userCode)
-
-		if err != nil {
-			SendAuthError(c, 0)
-			return
-		}
-
-		details := PrepareUserDetails(
-			result,
-			accessToken,
-			refreshToken,
-			expiresIn,
-			refreshTokenExpiresIn,
-		)
-
-		c.JSON(http.StatusOK, gin.H{
-			"id":      id,
-			"details": details,
-			"status":  "1",
-			"errors":  []string{},
-		})
-		return
-	}
-
 	// ---------- NO TFA (First Step Login) ----------
 	delete(result, "NavigationScopesJson") // sensitive
 
@@ -170,5 +101,190 @@ func UserFromToken(c *gin.Context) {
 		"id":      user["id"],
 		"status":  "1",
 		"errors":  []string{},
+	})
+}
+
+func TfaLogin(c *gin.Context) {
+
+	// ---------- Bind ----------
+	var req TfaLoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		writeApiResult(c, ObjectResult[any]{
+			Details: nil,
+			Errors: []ErrorResult{
+				{ErrorType: ErrorBadRequest, FieldName: "", MessageCode: "Invalid_JSON"},
+			},
+		})
+		return
+	}
+
+	// ---------- Validate (match .NET DefaultRequired + validator) ----------
+	if errs := validateTfaLoginRequest(&req); len(errs) > 0 {
+		writeApiResult(c, ObjectResult[any]{Details: nil, Errors: errs})
+		return
+	}
+
+	// ---------- Load auth settings (match .NET) ----------
+	authSettings := loadAuthSettings()
+
+	// ---------- Step 1: SP GetSiteUsersAuthData ----------
+	res, err := ExecSP(
+		db.DB,
+		"v1_PublicRole_AuthModule_GetSiteUsersAuthData",
+		map[string]any{
+			"Username":    req.Username,
+			"AccountType": "Admin", // .NET fixed
+			// Domain not passed in .NET for Admin -> keep omitted
+		},
+		1,
+	)
+	if err != nil {
+		// .NET would transform dbResult normally; keep safe generic:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	row, ok := AsSingleRow(res)
+	if !ok || row == nil {
+		writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errUserNotFound()})
+		return
+	}
+
+	authData, mapErr := mapRowToAuthData(row)
+	if mapErr != nil || authData.SiteUsersId <= 0 {
+		writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errUserNotFound()})
+		return
+	}
+
+	// ---------- Step 2: Account lock check (exact .NET) ----------
+	if isAccountLocked(authSettings, authData.TryLoginCount, authData.DateLastFailedLogin) {
+		writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errAccountLocked()})
+		return
+	}
+
+	// ---------- Step 3: Password verify ----------
+	okPass, err := VerifyPassword(req.Password, authData.PasswordHash)
+	if err != nil || !okPass {
+		// record failed login SP (like .NET)
+		_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+
+		writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errInvalidPassword()})
+		return
+	}
+
+	// ---------- Step 4: Email not verified => success WITHOUT token ----------
+	// .NET: if !bEmailVerified => success with flags only
+	if !authData.BEmailVerified {
+		details := LoginSuccessDetails{
+			AccessToken:              nil,
+			ExpiresIn:                0,
+			RefreshToken:             nil,
+			RefreshTokenExpiresIn:    0,
+			BTwoFactorAppAuthEnabled: authData.BTwoFactorAppAuthEnabled,
+			BTwoFactorSMSAuthEnabled: authData.BTwoFactorSMSAuthEnabled,
+			BEmailVerified:           authData.BEmailVerified,
+		}
+
+		writeApiResult(c, ObjectResult[LoginSuccessDetails]{Id: authData.SiteUsersId, Details: details, Errors: []ErrorResult{}})
+		return
+	}
+
+	// ---------- Step 5: Validate TFA (match .NET ValidationHelper.ValidateTfaCodeAsync behavior) ----------
+	now := time.Now().UTC()
+
+	if req.TfaType == "AuthenticatorApp" {
+		// if disabled => treat as "NoTfaEnabled" in service flow, but in tfalogin command they are forcing required.
+		// In your .NET flow, if user chooses AuthenticatorApp but user doesn't have it enabled, VerifyTotp won't pass => invalid.
+		// However ValidationHelper has a TfaType_Disabled check when called in other flows, not in TfaLoginAsync (it uses ValidateTfaLoginAttempt).
+		// Here, service uses ValidateTfaLoginAttempt which checks enabled.
+		if !authData.BTwoFactorAppAuthEnabled {
+			// result => BadRequest TfaCode_Invalid (because service returns NoTfaEnabled => treated as invalid for this login attempt)
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaInvalid()})
+			return
+		}
+
+		if authData.TotpSharedSecret == nil || *authData.TotpSharedSecret == "" {
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaInvalid()})
+			return
+		}
+
+		if !verifyTotp(req.TfaCode, *authData.TotpSharedSecret, authSettings.TotpAllowedPreviousEpochs, authSettings.TotpAllowedFutureEpochs, now) {
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaInvalid()})
+			return
+		}
+	}
+
+	if req.TfaType == "SMS" {
+		if !authData.BTwoFactorSMSAuthEnabled {
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaInvalid()})
+			return
+		}
+
+		if authData.TfaCodeExpiry != nil && authData.TfaCodeExpiry.UTC().Before(now) {
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaExpired()})
+			return
+		}
+
+		if authData.TfaCode == nil || *authData.TfaCode != req.TfaCode {
+			_, _ = ExecSP(db.DB, "v2_PublicRole_AuthModule_FailLogin", buildFailLoginParams(authData, c), 0)
+			writeApiResult(c, ObjectResult[LoginSuccessDetails]{Details: LoginSuccessDetails{}, Errors: errTfaInvalid()})
+			return
+		}
+	}
+
+	// ---------- Step 6: SUCCESS => Generate tokens (match .NET TokenHelper) ----------
+	firstName, lastName, userCode := "", "", ""
+	if authData.FirstName != nil {
+		firstName = *authData.FirstName
+	}
+	if authData.LastName != nil {
+		lastName = *authData.LastName
+	}
+	if authData.UserCode != nil {
+		userCode = *authData.UserCode
+	}
+
+	allowedCdl := ""
+	if authData.AllowedApiEndpointsCdl != nil {
+		allowedCdl = *authData.AllowedApiEndpointsCdl
+	}
+
+	accessToken, expiresIn, refreshToken, refreshExpiresIn, tokErr :=
+		generateJwtAndRefresh(authSettings, authData.SiteUsersId, req.RememberMe, firstName, lastName, userCode, allowedCdl)
+
+	if tokErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token generation failed"})
+		return
+	}
+
+	// ---------- Step 7: SP SucceedLogin (IMPORTANT: no RefreshTokenExpiry passed) ----------
+	_, _ = ExecSP(
+		db.DB,
+		"v2_PublicRole_AuthModule_SucceedLogin",
+		buildSucceedLoginParams(authData, refreshToken, c),
+		0,
+	)
+
+	// ---------- Step 8: Response details (match .NET LoginSuccessResultDetails) ----------
+	details := LoginSuccessDetails{
+		AccessToken:              accessToken,
+		ExpiresIn:                expiresIn,
+		RefreshToken:             refreshToken,
+		RefreshTokenExpiresIn:    refreshExpiresIn,
+		BTwoFactorAppAuthEnabled: authData.BTwoFactorAppAuthEnabled,
+		BTwoFactorSMSAuthEnabled: authData.BTwoFactorSMSAuthEnabled,
+		BEmailVerified:           authData.BEmailVerified,
+		Scopes:                   parseScopesJson(authData.NavigationScopesJson),
+	}
+
+	writeApiResult(c, ObjectResult[LoginSuccessDetails]{
+		Id:      authData.SiteUsersId,
+		Details: details,
+		Errors:  []ErrorResult{},
 	})
 }
