@@ -206,12 +206,16 @@ func PrepareUserDetails(result map[string]interface{}, accessToken interface{}, 
 		// fmt.Println("Parsing scopes:", scopes)
 		// Try to parse as JSON array of objects
 		var parsedScopes []map[string]interface{}
+		// var prepareAccessElements map[string]interface{}
 		switch v := scopes.(type) {
 		case string:
 			if v != "" {
 				if err := json.Unmarshal([]byte(v), &parsedScopes); err == nil {
 					if len(parsedScopes) > 0 {
-						details["scopes"] = parsedScopes
+						for _, scope := range parsedScopes {
+							fmt.Print(scope)
+						}
+						// details["scopes"] = parsedScopes
 					}
 				}
 			}
@@ -518,7 +522,7 @@ func SucceedLogin(
 		"UserAgent":               userAgent,
 		"IP":                      ip,
 		"Location":                locationJSON,
-		"DateLastFailedLogin":     dateLastFailedLogin,
+		"DateLastFailedLogin":     nil,
 	})
 }
 
