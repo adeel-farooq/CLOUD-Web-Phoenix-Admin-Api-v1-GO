@@ -62,3 +62,15 @@ const (
 	TfaAuthenticatorApp = "AuthenticatorApp"
 	TfaSMS              = "SMS"
 )
+
+type TfaLoginRequest struct {
+	// .NET me AccountType JsonIgnore hota hai, so ignore (optional)
+	AccountType *int `json:"accountType,omitempty"`
+
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	RememberMe bool   `json:"rememberMe"`
+
+	TfaCode string `json:"tfaCode"`
+	TfaType string `json:"tfaType"` // "SMS" | "AuthenticatorApp"
+}

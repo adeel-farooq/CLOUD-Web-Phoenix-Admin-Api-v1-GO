@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha1" // PBKDF2 default in .NET Rfc2898DeriveBytes
 	"encoding/base64"
 	"fmt"
@@ -214,45 +216,46 @@ func SendAuthError(c *gin.Context, errorType int) {
 		"errors":  errorMsg,
 	})
 }
-func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string, userCode string) (string, string, int, int, error) {
-	now := time.Now().UTC()
 
-	// Get JWT secret and expiry from environment
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "your_default_jwt_secret_here"
-	}
-	jwtExpiryStr := os.Getenv("JWT_EXPIRY_MINUTES")
-	jwtExpiryMinutes := 60
-	if jwtExpiryStr != "" {
-		if v, err := strconv.Atoi(jwtExpiryStr); err == nil {
-			jwtExpiryMinutes = v
-		}
-	}
-	jwtExpirySeconds := jwtExpiryMinutes * 60
+// func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string, userCode string) (string, string, int, int, error) {
+// 	now := time.Now().UTC()
 
-	claims := jwt.MapClaims{
-		"sub":         strconv.Itoa(userID),
-		"exp":         now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
-		"RememberMe":  rememberMe,
-		"id":          userID,
-		"firstName":   firstName,
-		"lastName":    lastName,
-		"accountType": accountType,
-		"userCode":    userCode,
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	accessToken, err := token.SignedString([]byte(jwtSecret))
-	if err != nil {
-		return "", "", 0, 0, err
-	}
+// 	// Get JWT secret and expiry from environment
+// 	jwtSecret := os.Getenv("JWT_SECRET")
+// 	if jwtSecret == "" {
+// 		jwtSecret = "your_default_jwt_secret_here"
+// 	}
+// 	jwtExpiryStr := os.Getenv("JWT_EXPIRY_MINUTES")
+// 	jwtExpiryMinutes := 60
+// 	if jwtExpiryStr != "" {
+// 		if v, err := strconv.Atoi(jwtExpiryStr); err == nil {
+// 			jwtExpiryMinutes = v
+// 		}
+// 	}
+// 	jwtExpirySeconds := jwtExpiryMinutes * 60
 
-	refreshToken := uuid.NewString()
-	refreshExpiry := now.Add(time.Hour * 24 * 30) // 30 days
-	refreshTokenExpiresIn := int(refreshExpiry.Sub(now).Seconds())
+// 	claims := jwt.MapClaims{
+// 		"sub":         strconv.Itoa(userID),
+// 		"exp":         now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
+// 		"RememberMe":  rememberMe,
+// 		"id":          userID,
+// 		"firstName":   firstName,
+// 		"lastName":    lastName,
+// 		"accountType": accountType,
+// 		"userCode":    userCode,
+// 	}
+// 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+// 	accessToken, err := token.SignedString([]byte(jwtSecret))
+// 	if err != nil {
+// 		return "", "", 0, 0, err
+// 	}
 
-	return accessToken, refreshToken, jwtExpirySeconds, refreshTokenExpiresIn, nil
-}
+// 	refreshToken := uuid.NewString()
+// 	refreshExpiry := now.Add(time.Hour * 24 * 30) // 30 days
+// 	refreshTokenExpiresIn := int(refreshExpiry.Sub(now).Seconds())
+
+// 	return accessToken, refreshToken, jwtExpirySeconds, refreshTokenExpiresIn, nil
+// }
 
 // ExtractUserID extracts user ID from JWT claims
 func ExtractUser(c *gin.Context) map[string]interface{} {
@@ -461,4 +464,134 @@ func scanRow(columns []string, rows *sql.Rows) (map[string]interface{}, error) {
 		}
 	}
 	return row, nil
+}
+
+func sendError(c *gin.Context, httpCode int, field string, code string) {
+	c.JSON(httpCode, gin.H{
+		"id":      0,
+		"details": nil,
+		"status":  "0",
+		"errors": []gin.H{
+			{"fieldName": field, "messageCode": code},
+		},
+	})
+}
+
+func sendUserPassError(c *gin.Context, httpCode int, code string) {
+	c.JSON(httpCode, gin.H{
+		"id":      0,
+		"details": nil,
+		"status":  "0",
+		"errors": []gin.H{
+			{"fieldName": "Username", "messageCode": code},
+			{"fieldName": "Password", "messageCode": code},
+		},
+	})
+}
+
+func compressToBase64String(input string) (string, bool) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return "", false
+	}
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, _ = gz.Write([]byte(input))
+	_ = gz.Close()
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), true
+}
+
+func GenerateTokens(
+	userID int,
+	rememberMe bool,
+	firstName string,
+	lastName string,
+	accountType string,
+	userCode string,
+	allowedApiEndpointsCdl string,
+) (string, string, int, int, error) {
+
+	now := time.Now().UTC()
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "your_default_jwt_secret_here"
+	}
+
+	jwtExpiryMinutes := 30
+	if v := os.Getenv("JWT_EXPIRY_MINUTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			jwtExpiryMinutes = n
+		}
+	}
+	jwtExpirySeconds := jwtExpiryMinutes * 60
+
+	refreshExpiryMinutes := 60
+	if rememberMe {
+		if v := os.Getenv("REFRESH_TOKEN_REMEMBERME_EXPIRY_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				refreshExpiryMinutes = n
+			}
+		}
+	} else {
+		if v := os.Getenv("REFRESH_TOKEN_EXPIRY_MINUTES"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				refreshExpiryMinutes = n
+			}
+		}
+	}
+	refreshTokenExpiresIn := refreshExpiryMinutes * 60
+
+	rememberMeStr := "False"
+	if rememberMe {
+		rememberMeStr = "True"
+	}
+
+	// Scopes = gzip+base64(AllowedApiEndpointsCdl)
+	scopes := ""
+	if s, ok := compressToBase64String(allowedApiEndpointsCdl); ok {
+		scopes = s
+	}
+
+	claims := jwt.MapClaims{
+		"sub": strconv.Itoa(userID),
+		"jti": uuid.New().String(),
+
+		"iat": strconv.FormatInt(now.Unix(), 10),
+		"nbf": now.Unix(),
+		"exp": now.Add(time.Minute * time.Duration(jwtExpiryMinutes)).Unix(),
+
+		"AccountType": accountType,
+		"FirstName":   firstName,
+		"LastName":    lastName,
+		"UserCode":    userCode,
+		"RememberMe":  rememberMeStr,
+		"Scopes":      scopes,
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	accessToken, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		return "", "", 0, 0, err
+	}
+
+	refreshToken := uuid.NewString()
+	return accessToken, refreshToken, jwtExpirySeconds, refreshTokenExpiresIn, nil
+}
+
+func getString(result map[string]interface{}, key string) string {
+	v, ok := result[key]
+	if !ok || v == nil {
+		return ""
+	}
+	switch s := v.(type) {
+	case string:
+		return s
+	case []byte:
+		return string(s)
+	default:
+		return ""
+	}
 }

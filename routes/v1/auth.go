@@ -8,6 +8,6 @@ import (
 
 func RegisterAuthRoutes(router *gin.RouterGroup) {
 	router.POST("/authmodule/login", auth.SignIn)
-	router.POST("/authmodule/tfalogin", auth.SignIn)
+	router.POST("/authmodule/tfalogin", auth.TfaLogin)
 
 }
