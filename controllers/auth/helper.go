@@ -6,6 +6,7 @@ import (
 	"crypto/sha1" // PBKDF2 default in .NET Rfc2898DeriveBytes
 	"encoding/base64"
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strconv"
@@ -158,6 +159,37 @@ func VerifyTotp(totpCode string, secretKey string) bool {
 	valid, _ := totp.ValidateCustom(cleanCode, secretKey, time.Now().UTC(), opts)
 	return valid
 }
+
+// VerifyTotpWithSkew validates TOTP allowing asymmetric previous/future epochs (30s steps).
+func VerifyTotpWithSkew(code string, secret string, prevEpochs int, futureEpochs int) bool {
+	if strings.TrimSpace(secret) == "" || strings.TrimSpace(code) == "" {
+		return false
+	}
+	cleanCode := strings.ReplaceAll(code, " ", "")
+	if prevEpochs < 0 {
+		prevEpochs = 0
+	}
+	if futureEpochs < 0 {
+		futureEpochs = 0
+	}
+
+	opts := totp.ValidateOpts{
+		Period:    30,
+		Skew:      0,
+		Digits:    6,
+		Algorithm: otp.AlgorithmSHA1,
+	}
+
+	now := time.Now().UTC()
+	for step := -prevEpochs; step <= futureEpochs; step++ {
+		t := now.Add(time.Duration(step*30) * time.Second)
+		valid, _ := totp.ValidateCustom(cleanCode, secret, t, opts)
+		if valid {
+			return true
+		}
+	}
+	return false
+}
 func PrepareUserDetails(result map[string]interface{}, accessToken interface{}, refreshToken interface{}, expiresIn int, refreshTokenExpiresIn int) gin.H {
 	details := gin.H{
 		"accessToken":              accessToken,
@@ -215,6 +247,311 @@ func SendAuthError(c *gin.Context, errorType int) {
 		"status":  "0",
 		"errors":  errorMsg,
 	})
+}
+
+// ------------------------ Env + row helpers ------------------------
+
+func getIntEnvAny(keys []string, def int) int {
+	for _, k := range keys {
+		v := strings.TrimSpace(os.Getenv(k))
+		if v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+func getInt64(row map[string]interface{}, key string) int64 {
+	if row == nil {
+		return 0
+	}
+	v := row[key]
+	if v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case string:
+		if n, err := strconv.ParseInt(strings.TrimSpace(t), 10, 64); err == nil {
+			return n
+		}
+	case []byte:
+		if n, err := strconv.ParseInt(strings.TrimSpace(string(t)), 10, 64); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+func getBoolAny(row map[string]interface{}, keys []string) bool {
+	if row == nil {
+		return false
+	}
+	for _, k := range keys {
+		v, ok := row[k]
+		if !ok || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case bool:
+			return t
+		case int64:
+			return t != 0
+		case int:
+			return t != 0
+		case float64:
+			return t != 0
+		case string:
+			s := strings.ToLower(strings.TrimSpace(t))
+			return s == "true" || s == "1" || s == "yes"
+		}
+	}
+	return false
+}
+
+func getTimeAny(row map[string]interface{}, keys []string) (time.Time, bool) {
+	if row == nil {
+		return time.Time{}, false
+	}
+	for _, k := range keys {
+		v := row[k]
+		if v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case time.Time:
+			return t, true
+		case string:
+			s := strings.TrimSpace(t)
+			if s == "" {
+				continue
+			}
+			if tt, err := time.Parse(time.RFC3339Nano, s); err == nil {
+				return tt, true
+			}
+			if tt, err := time.Parse(time.RFC3339, s); err == nil {
+				return tt, true
+			}
+		case []byte:
+			s := strings.TrimSpace(string(t))
+			if s == "" {
+				continue
+			}
+			if tt, err := time.Parse(time.RFC3339Nano, s); err == nil {
+				return tt, true
+			}
+			if tt, err := time.Parse(time.RFC3339, s); err == nil {
+				return tt, true
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func getStringAny(result map[string]interface{}, keys []string) string {
+	for _, k := range keys {
+		if s := getString(result, k); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func getAny(row map[string]interface{}, keys []string) interface{} {
+	if row == nil {
+		return nil
+	}
+	for _, k := range keys {
+		if v, ok := row[k]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func getLocationJSONSafe(ip string) string {
+	if strings.TrimSpace(ip) == "" {
+		return ""
+	}
+	// Placeholder; the v2 SP expects NVARCHAR(100) Location.
+	return "Unknown Location"
+}
+
+func userAgentSafe(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	ua := strings.TrimSpace(c.GetHeader("User-Agent"))
+	if ua == "" {
+		return ""
+	}
+	if len(ua) > 1000 {
+		ua = ua[:1000]
+	}
+	return ua
+}
+
+// ------------------------ Login audit SP calls ------------------------
+
+// ExecSPNonQuery executes a stored procedure that returns no resultset.
+func ExecSPNonQuery(db *sql.DB, spName string, params map[string]interface{}) error {
+	if db == nil {
+		return errors.New("db not initialized")
+	}
+
+	query := "exec " + spName
+	args := []interface{}{}
+
+	keys := orderedSPParamKeys(params)
+	for i, k := range keys {
+		if i == 0 {
+			query += " "
+		} else {
+			query += ", "
+		}
+		query += "@" + k + " = @" + k
+		args = append(args, sql.Named(k, params[k]))
+	}
+
+	finalQuery := "exec " + spName
+	for i, k := range keys {
+		v := params[k]
+		if i == 0 {
+			finalQuery += " "
+		} else {
+			finalQuery += ","
+		}
+		finalQuery += "@" + k + "="
+		if v == nil {
+			finalQuery += "null"
+			continue
+		}
+		switch val := v.(type) {
+		case string:
+			finalQuery += "'" + val + "'"
+		case int, int64, float64:
+			finalQuery += fmt.Sprintf("%v", val)
+		case bool:
+			if val {
+				finalQuery += "1"
+			} else {
+				finalQuery += "0"
+			}
+		case time.Time:
+			// .NET-style: 2026-01-26T10:53:41.982
+			tt := val.UTC().Truncate(time.Millisecond)
+			finalQuery += "'" + tt.Format("2006-01-02T15:04:05.000") + "'"
+		case *time.Time:
+			if val == nil {
+				finalQuery += "null"
+			} else {
+				tt := val.UTC().Truncate(time.Millisecond)
+				finalQuery += "'" + tt.Format("2006-01-02T15:04:05.000") + "'"
+			}
+		default:
+			finalQuery += fmt.Sprintf("'%v'", val)
+		}
+	}
+
+	pkg.Log("[SP CALL]", finalQuery)
+
+	_, err := db.Exec(query, args...)
+	if err != nil {
+		pkg.Log("[SP ERROR]", err)
+	}
+	return err
+}
+
+// ---- FailLogin: same SP as .NET ----
+func FailLogin(
+	db *sql.DB,
+	siteUsersId int64,
+	tryLoginCount int64,
+	dateLastSuccessful interface{},
+	now time.Time,
+	browserSummary, userAgent, ip, locationJSON string,
+) {
+	if db == nil || siteUsersId <= 0 {
+		return
+	}
+	_ = ExecSPNonQuery(db, "v2_PublicRole_AuthModule_FailLogin", map[string]interface{}{
+		"SiteUsersId":             siteUsersId,
+		"TryLoginCount":           tryLoginCount,
+		"DateLastSuccessfulLogin": dateLastSuccessful,
+		"DateLastFailedLogin":     now,
+		"Browser":                 browserSummary,
+		"UserAgent":               userAgent,
+		"IP":                      ip,
+		"Location":                locationJSON,
+	})
+}
+
+// ---- SucceedLogin: same SP as .NET ----
+func SucceedLogin(
+	db *sql.DB,
+	siteUsersId int64,
+	refreshToken string,
+	refreshExpiry time.Time,
+	browserSummary, userAgent, ip, locationJSON string,
+	dateLastSuccessfulLogin time.Time,
+	dateLastFailedLogin time.Time,
+) {
+	if db == nil || siteUsersId <= 0 {
+		return
+	}
+	_ = ExecSPNonQuery(db, "v2_PublicRole_AuthModule_SucceedLogin", map[string]interface{}{
+		"SiteUsersId":             siteUsersId,
+		"RefreshToken":            refreshToken,
+		"RefreshTokenExpiry":      refreshExpiry,
+		"DateLastSuccessfulLogin": dateLastSuccessfulLogin,
+		"TryLoginCount":           0,
+		"Browser":                 browserSummary,
+		"UserAgent":               userAgent,
+		"IP":                      ip,
+		"Location":                locationJSON,
+		"DateLastFailedLogin":     dateLastFailedLogin,
+	})
+}
+
+func clientIPSafe(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	ip := strings.TrimSpace(c.ClientIP())
+	if ip == "" {
+		return ""
+	}
+	if net.ParseIP(ip) == nil {
+		return ""
+	}
+	return ip
+}
+
+func getBrowserSummaryDotNetStyle(userAgent string) string {
+	ua := strings.TrimSpace(userAgent)
+	if ua == "" {
+		return ""
+	}
+	if len(ua) > 500 {
+		ua = ua[:500]
+	}
+	return ua
+}
+
+func getLocationSafe(ip string) string {
+	if strings.TrimSpace(ip) == "" {
+		return ""
+	}
+	return "Unknown Location"
 }
 
 // func GenerateTokens(userID int, rememberMe bool, firstName string, lastName string, accountType string, userCode string) (string, string, int, int, error) {
@@ -282,7 +619,7 @@ func ExtractUser(c *gin.Context) map[string]interface{} {
 
 	user := make(map[string]interface{})
 
-	// ---- ID handling (int / float / string safe) ----
+	// ---- ID handling: support old (id) and .NET-like (sub) ----
 	if idVal, ok := claims["id"]; ok {
 		switch v := idVal.(type) {
 		case float64:
@@ -290,22 +627,43 @@ func ExtractUser(c *gin.Context) map[string]interface{} {
 		case int:
 			user["id"] = v
 		case string:
-			if idInt, err := strconv.Atoi(v); err == nil {
+			if idInt, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
 				user["id"] = idInt
 			}
 		}
 	}
+	if _, ok := user["id"]; !ok {
+		if sub, ok := claims["sub"]; ok {
+			switch v := sub.(type) {
+			case string:
+				if idInt, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					user["id"] = idInt
+				}
+			case float64:
+				user["id"] = int(v)
+			}
+		}
+	}
 
-	if v, ok := claims["firstName"].(string); ok {
+	// Accept both camelCase and PascalCase claim keys
+	if v, ok := claims["FirstName"].(string); ok {
+		user["FirstName"] = v
+	} else if v, ok := claims["firstName"].(string); ok {
 		user["FirstName"] = v
 	}
-	if v, ok := claims["lastName"].(string); ok {
+	if v, ok := claims["LastName"].(string); ok {
+		user["LastName"] = v
+	} else if v, ok := claims["lastName"].(string); ok {
 		user["LastName"] = v
 	}
-	if v, ok := claims["accountType"].(string); ok {
+	if v, ok := claims["AccountType"].(string); ok {
+		user["AccountType"] = v
+	} else if v, ok := claims["accountType"].(string); ok {
 		user["AccountType"] = v
 	}
-	if v, ok := claims["userCode"].(string); ok {
+	if v, ok := claims["UserCode"].(string); ok {
+		user["UserCode"] = v
+	} else if v, ok := claims["userCode"].(string); ok {
 		user["UserCode"] = v
 	}
 
@@ -364,6 +722,17 @@ func ExecSP(
 				finalQuery += "1"
 			} else {
 				finalQuery += "0"
+			}
+		case time.Time:
+			// .NET-style: 2026-01-26T10:53:41.982
+			tt := val.UTC().Truncate(time.Millisecond)
+			finalQuery += "'" + tt.Format("2006-01-02T15:04:05.000") + "'"
+		case *time.Time:
+			if val == nil {
+				finalQuery += "null"
+			} else {
+				tt := val.UTC().Truncate(time.Millisecond)
+				finalQuery += "'" + tt.Format("2006-01-02T15:04:05.000") + "'"
 			}
 		default:
 			finalQuery += fmt.Sprintf("'%v'", val)
@@ -515,9 +884,12 @@ func GenerateTokens(
 
 	now := time.Now().UTC()
 
-	jwtSecret := os.Getenv("JWT_SECRET")
+	jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if jwtSecret == "" {
-		jwtSecret = "your_default_jwt_secret_here"
+		jwtSecret = strings.TrimSpace(os.Getenv("JWT_SIGNING_KEY"))
+	}
+	if jwtSecret == "" {
+		return "", "", 0, 0, errors.New("JWT_SECRET/JWT_SIGNING_KEY missing")
 	}
 
 	jwtExpiryMinutes := 30
@@ -528,19 +900,12 @@ func GenerateTokens(
 	}
 	jwtExpirySeconds := jwtExpiryMinutes * 60
 
-	refreshExpiryMinutes := 60
+	refreshExpiryMinutes := getIntEnvAny([]string{"REFRESH_TOKEN_EXPIRY_MINUTES"}, 60)
 	if rememberMe {
-		if v := os.Getenv("REFRESH_TOKEN_REMEMBERME_EXPIRY_MINUTES"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				refreshExpiryMinutes = n
-			}
-		}
-	} else {
-		if v := os.Getenv("REFRESH_TOKEN_EXPIRY_MINUTES"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				refreshExpiryMinutes = n
-			}
-		}
+		refreshExpiryMinutes = getIntEnvAny(
+			[]string{"REFRESH_TOKEN_REMEMBERME_EXPIRY_MINUTES", "REFRESH_TOKEN_REMEMBER_ME_EXPIRY_MINUTES"},
+			refreshExpiryMinutes,
+		)
 	}
 	refreshTokenExpiresIn := refreshExpiryMinutes * 60
 
