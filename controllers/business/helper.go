@@ -279,3 +279,324 @@ func toInt(v interface{}) int {
 		return 0
 	}
 }
+
+// .NET-like SP params for v1_AdminRole_BusinessModule_List
+func BuildBusinessListSPParamsNetLike(q admin.QueryRecordList, siteUsersId int) map[string]interface{} {
+	return map[string]interface{}{
+		"User_SiteUsersID": siteUsersId,
+
+		"PageNumber": q.PageNumber,
+		"PageSize":   q.PageSize,
+
+		// SP signature has these
+		"Filters":      nilIfEmpty(q.Filters),
+		"SortBy":       nilIfEmpty(q.SortBy),
+		"SearchString": nil, // IMPORTANT: This SP builds its own SQL; keep NULL unless you really build it.
+
+		"RawFilterString": nilIfEmpty(q.Filters),
+		"RawSortString":   nilIfEmpty(q.SortBy),
+
+		// RawSearchString: agar search empty hai to NULL bhejo
+		"RawSearchString": nilIfEmpty(q.Search),
+
+		"ListKey":    "Business",
+		"TrackingID": "DefaultTrackingID",
+	}
+}
+
+func NormalizeColumnsDetailsNull(cols []map[string]interface{}) []map[string]interface{} {
+	// .NET me TextContains/Amount ke details aksar null hotay hain ({} nahi)
+	for _, c := range cols {
+		if fm, ok := c["filterMetadata"].(map[string]interface{}); ok && fm != nil {
+			// agar details {} ho to null kar do (except DateTime:Range jahan {} aa sakta hai)
+			ft, _ := fm["filterType"].(string)
+			if ft != "DateTime:Range" {
+				fm["details"] = nil
+			}
+		}
+	}
+	return cols
+}
+func BusinessColumns() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"columnKey":   "Customers__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 1,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    false,
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "Customers__CustomersCode",
+			"labelKey":    "CustomersCode",
+			"labelValue":  "Code",
+			"orderNumber": 2,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "LicenseesBrands__StatementDescriptor",
+			"labelKey":    "StatementDescriptor",
+			"labelValue":  "Brand",
+			"orderNumber": 3,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "Customers__CompanyName",
+			"labelKey":    "CompanyName",
+			"labelValue":  "Name",
+			"orderNumber": 4,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "Customers__CompanyEmailAddress",
+			"labelKey":    "CompanyEmailAddress",
+			"labelValue":  "Email",
+			"orderNumber": 5,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// Docs Verified (SingleChoice 0/1)
+		{
+			"columnKey":   "Customers__bBusinessDocumentsVerified",
+			"labelKey":    "bBusinessDocumentsVerified",
+			"labelValue":  "Docs. Verified",
+			"orderNumber": 6,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Unverified"},
+						{"value": "1", "label": "Verified"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// Financial Institution (0/1)
+		{
+			"columnKey":   "Customers__bFinancialInstitution",
+			"labelKey":    "bFinancialInstitution",
+			"labelValue":  "Financial Institution",
+			"orderNumber": 7,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "No"},
+						{"value": "1", "label": "Yes"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// Docs Submitted (0/1)
+		{
+			"columnKey":   "Customers__bAllDocumentsSubmitted",
+			"labelKey":    "bAllDocumentsSubmitted",
+			"labelValue":  "Docs. Submitted",
+			"orderNumber": 8,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Unsubmitted"},
+						{"value": "1", "label": "Submitted"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// Virtual (0/1)
+		{
+			"columnKey":   "Customers__bVirtual",
+			"labelKey":    "bVirtual",
+			"labelValue":  "Virtual",
+			"orderNumber": 9,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "No"},
+						{"value": "1", "label": "Yes"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// Business Verification Status
+		{
+			"columnKey":   "Customers__BusinessVerificationStatus",
+			"labelKey":    "BusinessVerificationStatus",
+			"labelValue":  "Ver. Status",
+			"orderNumber": 10,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// Submitted Form (no FilterMetadata in .NET)
+		{
+			"columnKey":      "Customers__bSubmittedForm",
+			"labelKey":       "bSubmittedForm",
+			"labelValue":     "Submitted Form",
+			"orderNumber":    11,
+			"bSortable":      true,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+
+		// Frozen (0/1)
+		{
+			"columnKey":   "Customers__bFrozen",
+			"labelKey":    "bFrozen",
+			"labelValue":  "Frozen",
+			"orderNumber": 12,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Unfrozen"},
+						{"value": "1", "label": "Frozen"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// Add Date (DateTime:Range)
+		{
+			"columnKey":   "Customers__AddDate",
+			"labelKey":    "AddDate",
+			"labelValue":  "Add Date",
+			"orderNumber": 13,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+
+		// CustomerUsers Id (hidden)
+		{
+			"columnKey":   "CustomerUsers__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 14,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    false,
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// New Account Available (hidden, not filterable/sortable)
+		{
+			"columnKey":      "CustomersAvailableAccounts__bNewAccountAvailable",
+			"labelKey":       "bNewAccountAvailable",
+			"labelValue":     "bNewAccountAvailable",
+			"orderNumber":    15,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+	}
+}
