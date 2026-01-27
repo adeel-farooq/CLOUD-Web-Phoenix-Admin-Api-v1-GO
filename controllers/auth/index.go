@@ -36,13 +36,14 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	// ---------- Call Stored Procedure (Single Row) ----------
+	// ---------- Step-1: GetSiteUsersAuthData (Single Row) ----------
 	res, err := ExecSP(
 		db.DB,
 		"v1_PublicRole_AuthModule_GetSiteUsersAuthData",
 		map[string]interface{}{
 			"Username":    requestBody.Username,
 			"AccountType": "Admin",
+			"Domain":      nil,
 		},
 		1, // 1 = single row
 	)
@@ -65,20 +66,19 @@ func SignIn(c *gin.Context) {
 		return
 	}
 
-	// ---------- Account lock check (.NET ValidateLoginAttempt) ----------
-	tryCount := getInt64(result, "TryLoginCount")
-	if int(tryCount) >= getIntEnvAny([]string{"TRY_LOGIN_COUNTER_MAX"}, 5) {
-		sendUserPassError(c, http.StatusUnauthorized, "Account_Locked")
-		return
-	}
-
-	// ---------- Suppressed check ----------
+	// ---------- Step-2: ValidateLoginAttempt rules (.NET order) ----------
+	// 2A) AccountDisabled (bSuppressed)
 	if getBoolAny(result, []string{"bSuppressed", "BSuppressed"}) {
-		sendUserPassError(c, http.StatusUnauthorized, "Account_Suppressed")
+		sendUserPassError(c, http.StatusUnauthorized, "Account_Disabled")
 		return
 	}
 
-	// ---------- Password Validation ----------
+	// 2B) AccountLocked (TryLoginCount >= MaxTryLoginCount)
+	tryCount := getInt64(result, "TryLoginCount")
+	maxTry := getIntEnvAny([]string{"TRY_LOGIN_COUNTER_MAX"}, 5)
+	locked := maxTry > 0 && int(tryCount) >= maxTry
+
+	// 2C) Password verify
 	passHash, _ := result["PasswordHash"].(string)
 	if strings.TrimSpace(passHash) == "" {
 		sendUserPassError(c, http.StatusUnauthorized, "Username_Or_Password_Incorrect")
@@ -86,50 +86,106 @@ func SignIn(c *gin.Context) {
 	}
 
 	okPass, err := VerifyPassword(requestBody.Password, passHash)
+
+	// 2D) Locked handling: verify password; if wrong => RecordFailedLogin; always return Account_Locked
+	if locked {
+		if err != nil || !okPass {
+			now := time.Now().UTC()
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
+		}
+		sendUserPassError(c, http.StatusUnauthorized, "Account_Locked")
+		return
+	}
+
+	// 2E) Password invalid => RecordFailedLogin + invalid creds
 	if err != nil || !okPass {
 		now := time.Now().UTC()
-		ip := clientIPSafe(c)
-		ua := userAgentSafe(c)
-		browserSummary := getBrowserSummaryDotNetStyle(ua)
-		locationJSON := getLocationJSONSafe(ip)
-		tryCount := getInt64(result, "TryLoginCount")
-		lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-		FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+		var lastSuccess interface{} = nil
+		if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+			lastSuccess = t.UTC().Truncate(time.Millisecond)
+		}
+		V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 		sendUserPassError(c, http.StatusUnauthorized, "Username_Or_Password_Incorrect")
 		return
 	}
 
-	// ---------- NO TFA (First Step Login) ----------
-	delete(result, "NavigationScopesJson") // sensitive
+	// ---------- Step-3: Status handling (TFA vs Success) ----------
+	bSms := getBoolAny(result, []string{"bTwoFactorSMSAuthEnabled"})
+	bApp := getBoolAny(result, []string{"bTwoFactorAppAuthEnabled"})
 
-	details := PrepareUserDetails(result, nil, nil, 0, 0)
+	// SMSTfaEnabled => generate code + expiry + SucceedTfaPhaseOne, return success without token
+	if bSms {
+		code, genErr := generate6DigitCode()
+		if genErr != nil {
+			sendUserPassError(c, http.StatusUnauthorized, "Username_Or_Password_Incorrect")
+			return
+		}
+		expMin := getIntEnvAny([]string{"TFA_CODE_EXPIRY_MINUTES", "TFA_CODE_EXPIRE_MINUTES"}, 10)
+		expiry := time.Now().UTC().Add(time.Minute * time.Duration(expMin))
+
+		var lastSuccess interface{} = nil
+		if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+			lastSuccess = t.UTC().Truncate(time.Millisecond)
+		}
+		V1SucceedTfaPhaseOne(db.DB, siteUsersId, lastSuccess, code, expiry)
+
+		details := PrepareUserDetails(result, nil, nil, 0, 0)
+		c.JSON(http.StatusOK, gin.H{
+			"id":      int(siteUsersId),
+			"details": details,
+			"status":  "1",
+			"errors":  []gin.H{},
+		})
+		return
+	}
+
+	// AppTfaEnabled => return success without token
+	if bApp {
+		details := PrepareUserDetails(result, nil, nil, 0, 0)
+		c.JSON(http.StatusOK, gin.H{
+			"id":      int(siteUsersId),
+			"details": details,
+			"status":  "1",
+			"errors":  []gin.H{},
+		})
+		return
+	}
+
+	// Success (no TFA) => issue JWT + refresh, SucceedLogin
+	firstName := getStringAny(result, []string{"FirstName"})
+	lastName := getStringAny(result, []string{"LastName"})
+	userCode := getStringAny(result, []string{"UserCode"})
+	allowedCdl := getStringAny(result, []string{"AllowedAPIEndpointsCDL", "AllowedAPIEndpointsCDL", "AllowedAPIEndpointsCDL"})
+
+	accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err :=
+		GenerateTokens(int(siteUsersId), requestBody.RememberMe, firstName, lastName, "Admin", userCode, allowedCdl)
+	if err != nil || accessToken == "" {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token generation failed"})
+		return
+	}
+
+	now := time.Now().UTC()
+	ip := clientIPSafe(c)
+	ua := userAgentSafe(c)
+	browserSummary := getBrowserSummaryDotNetStyle(ua)
+	location := getLocationSafe(ip)
+	refreshExpiry := now.Add(time.Second * time.Duration(refreshTokenExpiresIn))
+	V1SucceedLogin(db.DB, siteUsersId, refreshToken, refreshExpiry, browserSummary, ua, ip, location, now)
+
+	details := PrepareUserDetails(result, accessToken, refreshToken, expiresIn, refreshTokenExpiresIn)
+	// Ensure flags match the decision we just made
+	details["bTwoFactorSMSAuthEnabled"] = bSms
+	details["bTwoFactorAppAuthEnabled"] = bApp
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      int(siteUsersId),
 		"details": details,
 		"status":  "1",
 		"errors":  []gin.H{},
-	})
-}
-
-func UserFromTokenold(c *gin.Context) {
-	user := ExtractUser(c)
-
-	if user == nil {
-		c.JSON(http.StatusOK, gin.H{
-			"details": nil,
-			"id":      0,
-			"status":  "0",
-			"errors":  []string{},
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"details": user,
-		"id":      user["id"],
-		"status":  "1",
-		"errors":  []string{},
 	})
 }
 
@@ -192,18 +248,14 @@ func TfaLogin(c *gin.Context) {
 		return
 	}
 
-	// ---------- Account lock check (.NET ValidateLoginAttempt) ----------
-	tryCount := getInt64(result, "TryLoginCount")
-	if int(tryCount) >= getIntEnvAny([]string{"TRY_LOGIN_COUNTER_MAX"}, 5) {
-		sendUserPassError(c, http.StatusUnauthorized, "Account_Locked")
-		return
-	}
-
-	// ---------- Suppressed check ----------
+	// ---------- ValidateLoginAttempt rules (.NET order) ----------
 	if getBoolAny(result, []string{"bSuppressed", "BSuppressed"}) {
-		sendUserPassError(c, http.StatusUnauthorized, "Account_Suppressed")
+		sendUserPassError(c, http.StatusUnauthorized, "Account_Disabled")
 		return
 	}
+	tryCount := getInt64(result, "TryLoginCount")
+	maxTry := getIntEnvAny([]string{"TRY_LOGIN_COUNTER_MAX"}, 5)
+	locked := maxTry > 0 && int(tryCount) >= maxTry
 
 	// ---------- Password Validation ----------
 	passHash, _ := result["PasswordHash"].(string)
@@ -213,15 +265,25 @@ func TfaLogin(c *gin.Context) {
 	}
 
 	okPass, err := VerifyPassword(requestBody.Password, passHash)
+	if locked {
+		if err != nil || !okPass {
+			now := time.Now().UTC()
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
+		}
+		sendUserPassError(c, http.StatusUnauthorized, "Account_Locked")
+		return
+	}
 	if err != nil || !okPass {
 		now := time.Now().UTC()
-		ip := clientIPSafe(c)
-		ua := userAgentSafe(c)
-		browserSummary := getBrowserSummaryDotNetStyle(ua)
-		locationJSON := getLocationJSONSafe(ip)
-		tryCount := getInt64(result, "TryLoginCount")
-		lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-		FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+		var lastSuccess interface{} = nil
+		if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+			lastSuccess = t.UTC().Truncate(time.Millisecond)
+		}
+		V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 		sendUserPassError(c, http.StatusUnauthorized, "Username_Or_Password_Incorrect")
 		return
 	}
@@ -238,13 +300,12 @@ func TfaLogin(c *gin.Context) {
 		// .NET: if login and app not enabled => NoTfaEnabled -> treated as failure
 		if b, ok := result["bTwoFactorAppAuthEnabled"].(bool); ok && !b {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "No_Tfa_Enabled")
 			return
 		}
@@ -261,13 +322,12 @@ func TfaLogin(c *gin.Context) {
 		// IMPORTANT: secret empty => must fail
 		if secret == "" {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "Invalid")
 			return
 		}
@@ -277,13 +337,12 @@ func TfaLogin(c *gin.Context) {
 			getIntEnvAny([]string{"TOTP_ALLOWED_FUTURE_EPOCHS"}, 1),
 		) {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "Invalid")
 			return
 		}
@@ -292,13 +351,12 @@ func TfaLogin(c *gin.Context) {
 	if requestBody.TfaType == "SMS" {
 		if b, ok := result["bTwoFactorSMSAuthEnabled"].(bool); ok && !b {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "No_Tfa_Enabled")
 			return
 		}
@@ -307,13 +365,12 @@ func TfaLogin(c *gin.Context) {
 		// Yahan direct result se read kar rahe hain.
 		if exp, ok := getTimeAny(result, []string{"TfaCodeExpiry"}); !ok || time.Now().UTC().After(exp.UTC()) {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "Expired")
 			return
 		}
@@ -321,13 +378,12 @@ func TfaLogin(c *gin.Context) {
 		code, _ := result["TfaCode"].(string)
 		if code == "" || code != requestBody.TfaCode {
 			now := time.Now().UTC()
-			ip := clientIPSafe(c)
-			ua := userAgentSafe(c)
-			browserSummary := getBrowserSummaryDotNetStyle(ua)
-			locationJSON := getLocationJSONSafe(ip)
 			tryCount := getInt64(result, "TryLoginCount")
-			lastSuccess := getAny(result, []string{"DateLastSuccessfulLogin"})
-			FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now, browserSummary, ua, ip, locationJSON)
+			var lastSuccess interface{} = nil
+			if t, ok := getTimeAny(result, []string{"DateLastSuccessfulLogin"}); ok {
+				lastSuccess = t.UTC().Truncate(time.Millisecond)
+			}
+			V1FailLogin(db.DB, siteUsersId, tryCount+1, lastSuccess, now)
 			sendError(c, http.StatusBadRequest, "TfaCode", "Invalid")
 			return
 		}
@@ -338,13 +394,12 @@ func TfaLogin(c *gin.Context) {
 	firstName, _ := result["FirstName"].(string)
 	lastName, _ := result["LastName"].(string)
 	userCode, _ := result["UserCode"].(string)
-	dateLastSuccessfulLogin, _ := getTimeAny(result, []string{"DateLastSuccessfulLogin"})
-	dateLastFailedLogin, _ := getTimeAny(result, []string{"DateLastFailedLogin"})
-	// pkg.Log(result, "AllowedApiEndpointsCdl:", getString(result, "AllowedApiEndpointsCdl"))
+	// v1 SucceedLogin sets DateLastSuccessfulLogin=now and TryLoginCount=0
+	// pkg.Log(result, "AllowedAPIEndpointsCDL:", getString(result, "AllowedAPIEndpointsCDL"))
 
 	// accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err :=
 	// 	GenerateTokens(id, requestBody.RememberMe, firstName, lastName, "Admin", userCode)
-	allowedCdl := getStringAny(result, []string{"AllowedApiEndpointsCdl", "AllowedAPIEndpointsCDL", "AllowedApiEndpointsCDL"})
+	allowedCdl := getStringAny(result, []string{"AllowedAPIEndpointsCDL", "AllowedAPIEndpointsCDL", "AllowedAPIEndpointsCDL"})
 
 	accessToken, refreshToken, expiresIn, refreshTokenExpiresIn, err :=
 		GenerateTokens(id, requestBody.RememberMe, firstName, lastName, "Admin", userCode, allowedCdl)
@@ -358,16 +413,9 @@ func TfaLogin(c *gin.Context) {
 	ip := clientIPSafe(c)
 	ua := userAgentSafe(c)
 	browserSummary := getBrowserSummaryDotNetStyle(ua)
-	locationJSON := getLocationJSONSafe(ip)
-	refreshExpiryMinutes := getIntEnvAny([]string{"REFRESH_TOKEN_EXPIRY_MINUTES"}, 60)
-	if requestBody.RememberMe {
-		refreshExpiryMinutes = getIntEnvAny(
-			[]string{"REFRESH_TOKEN_REMEMBERME_EXPIRY_MINUTES", "REFRESH_TOKEN_REMEMBER_ME_EXPIRY_MINUTES"},
-			refreshExpiryMinutes,
-		)
-	}
-	refreshExpiry := now.Add(time.Minute * time.Duration(refreshExpiryMinutes))
-	SucceedLogin(db.DB, siteUsersId, refreshToken, refreshExpiry, browserSummary, ua, ip, locationJSON, dateLastSuccessfulLogin, dateLastFailedLogin)
+	location := getLocationSafe(ip)
+	refreshExpiry := now.Add(time.Second * time.Duration(refreshTokenExpiresIn))
+	V1SucceedLogin(db.DB, siteUsersId, refreshToken, refreshExpiry, browserSummary, ua, ip, location, now)
 
 	details := PrepareUserDetails(result, accessToken, refreshToken, expiresIn, refreshTokenExpiresIn)
 

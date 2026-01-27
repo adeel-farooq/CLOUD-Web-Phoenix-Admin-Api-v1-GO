@@ -3,7 +3,7 @@ package auth
 type SignInRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Password    string `json:"password" binding:"required"`
-	RememberMe  bool   `json:"rememberMe" `
+	RememberMe  bool   `json:"rememberMe"`
 	AccountType int    `json:"accountType" `
 	TFACode     string `json:"tfaCode"`
 	TFAType     string `json:"tfaType"`

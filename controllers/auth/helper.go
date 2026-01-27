@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"crypto/sha1" // PBKDF2 default in .NET Rfc2898DeriveBytes
 	"encoding/base64"
 	"fmt"
@@ -212,20 +213,136 @@ func PrepareUserDetails(result map[string]interface{}, accessToken interface{}, 
 			if v != "" {
 				if err := json.Unmarshal([]byte(v), &parsedScopes); err == nil {
 					if len(parsedScopes) > 0 {
-						for _, scope := range parsedScopes {
-							fmt.Print(scope)
-						}
-						// details["scopes"] = parsedScopes
+						details["scopes"] = normalizeScopesAny(parsedScopes)
 					}
 				}
 			}
 		case []map[string]interface{}:
 			if len(v) > 0 {
-				details["scopes"] = v
+				details["scopes"] = normalizeScopesAny(v)
+			}
+		case []interface{}:
+			if len(v) > 0 {
+				details["scopes"] = normalizeScopesAny(v)
 			}
 		}
 	}
 	return details
+}
+
+func normalizeScopesAny(raw interface{}) interface{} {
+	if raw == nil {
+		return nil
+	}
+
+	// The API expects: []{displayName,path,position,usageType,childElements}
+	// and nested childElements with the same shape.
+
+	switch t := raw.(type) {
+	case []map[string]interface{}:
+		out := make([]interface{}, 0, len(t))
+		for _, node := range t {
+			out = append(out, normalizeScopeNode(node))
+		}
+		return out
+	case []interface{}:
+		out := make([]interface{}, 0, len(t))
+		for _, item := range t {
+			switch node := item.(type) {
+			case map[string]interface{}:
+				out = append(out, normalizeScopeNode(node))
+			default:
+				// ignore unknown shapes
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeScopeNode(node map[string]interface{}) map[string]interface{} {
+	if node == nil {
+		return map[string]interface{}{
+			"displayName":   "",
+			"path":          "",
+			"position":      nil,
+			"usageType":     nil,
+			"childElements": nil,
+		}
+	}
+
+	displayName := getStringFromMapAny(node, []string{"displayName", "DisplayName"})
+	path := getStringFromMapAny(node, []string{"path", "Path"})
+	position := getAnyFromMapAny(node, []string{"position", "Position"})
+	usageType := getAnyFromMapAny(node, []string{"usageType", "UsageType"})
+	childrenRaw := getAnyFromMapAny(node, []string{"childElements", "ChildElements"})
+	children := normalizeScopesAny(childrenRaw)
+
+	// Match your expected response: if no children => null
+	if childrenSlice, ok := children.([]interface{}); ok {
+		if len(childrenSlice) == 0 {
+			children = nil
+		}
+	}
+
+	return map[string]interface{}{
+		"displayName":   displayName,
+		"path":          path,
+		"position":      position,
+		"usageType":     usageType,
+		"childElements": children,
+	}
+}
+
+func getStringFromMapAny(m map[string]interface{}, keys []string) string {
+	for _, k := range keys {
+		if m == nil {
+			return ""
+		}
+		v, ok := m[k]
+		if !ok || v == nil {
+			continue
+		}
+		switch s := v.(type) {
+		case string:
+			return s
+		case []byte:
+			return string(s)
+		default:
+			// if it's numeric/bool etc, stringify like fmt does? skip for now
+		}
+	}
+	return ""
+}
+
+func getAnyFromMapAny(m map[string]interface{}, keys []string) interface{} {
+	for _, k := range keys {
+		if m == nil {
+			return nil
+		}
+		if v, ok := m[k]; ok {
+			return v
+		}
+	}
+	return nil
+}
+
+func generate6DigitCode() (string, error) {
+	// Cryptographically secure 6-digit code (000000-999999)
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	n := int(buf[0])<<24 | int(buf[1])<<16 | int(buf[2])<<8 | int(buf[3])
+	if n < 0 {
+		n = -n
+	}
+	code := n % 1000000
+	return fmt.Sprintf("%06d", code), nil
 }
 func SendAuthError(c *gin.Context, errorType int) {
 	errorMsg := []gin.H{}
@@ -499,6 +616,25 @@ func FailLogin(
 	})
 }
 
+// ---- V1 FailLogin: /api/v1/publicrole/authmodule/login ----
+func V1FailLogin(
+	db *sql.DB,
+	userId int64,
+	tryLoginCount int64,
+	dateLastSuccessful interface{},
+	now time.Time,
+) {
+	if db == nil || userId <= 0 {
+		return
+	}
+	_ = ExecSPNonQuery(db, "v1_PublicRole_AuthModule_FailLogin", map[string]interface{}{
+		"UserId":                  userId,
+		"TryLoginCount":           tryLoginCount,
+		"DateLastFailedLogin":     now,
+		"DateLastSuccessfulLogin": dateLastSuccessful,
+	})
+}
+
 // ---- SucceedLogin: same SP as .NET ----
 func SucceedLogin(
 	db *sql.DB,
@@ -523,6 +659,53 @@ func SucceedLogin(
 		"IP":                      ip,
 		"Location":                locationJSON,
 		"DateLastFailedLogin":     nil,
+	})
+}
+
+// ---- V1 SucceedTfaPhaseOne: SMS code + expiry, no tokens ----
+func V1SucceedTfaPhaseOne(
+	db *sql.DB,
+	userId int64,
+	dateLastSuccessful interface{},
+	tfaCode string,
+	tfaCodeExpiry time.Time,
+) {
+	if db == nil || userId <= 0 {
+		return
+	}
+	_ = ExecSPNonQuery(db, "v1_PublicRole_AuthModule_SucceedTfaPhaseOne", map[string]interface{}{
+		"UserId":                  userId,
+		"TryLoginCount":           0,
+		"DateLastSuccessfulLogin": dateLastSuccessful,
+		"DateLastFailedLogin":     nil,
+		"TfaCode":                 tfaCode,
+		"TfaCodeExpiry":           tfaCodeExpiry,
+	})
+}
+
+// ---- V1 SucceedLogin: issue refresh token + audit fields ----
+func V1SucceedLogin(
+	db *sql.DB,
+	userId int64,
+	refreshToken string,
+	refreshExpiry time.Time,
+	browserSummary, userAgent, ip, location string,
+	now time.Time,
+) {
+	if db == nil || userId <= 0 {
+		return
+	}
+	_ = ExecSPNonQuery(db, "v1_PublicRole_AuthModule_SucceedLogin", map[string]interface{}{
+		"UserId":                  userId,
+		"TryLoginCount":           0,
+		"DateLastSuccessfulLogin": now,
+		"DateLastFailedLogin":     nil,
+		"RefreshToken":            refreshToken,
+		"RefreshTokenExpiry":      refreshExpiry,
+		"BrowserSummary":          browserSummary,
+		"UserAgent":               userAgent,
+		"IpAddress":               ip,
+		"Location":                location,
 	})
 }
 
