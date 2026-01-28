@@ -853,7 +853,6 @@ func ExtractUser(c *gin.Context) map[string]interface{} {
 	} else if v, ok := claims["userCode"].(string); ok {
 		user["UserCode"] = v
 	}
-
 	if len(user) == 0 {
 		return nil
 	}
