@@ -375,6 +375,12 @@ func TransactionDetails(c *gin.Context) {
 	if detailsStr, ok := row["Details"].(string); ok && detailsStr != "" {
 		_ = json.Unmarshal([]byte(detailsStr), &details)
 	}
+	if details != nil {
+		if normalized, ok := normalizeJSONKeysLowerCamel(details).(map[string]interface{}); ok {
+			details = normalized
+		}
+		FormatMoneyFields2dp(details)
+	}
 
 	// .NET returns:
 	// { "Id": <int>, "Details": <object>, "Metadata": <array>, "Status": "1|0", "Errors": [...] }

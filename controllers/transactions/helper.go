@@ -3,9 +3,42 @@ package transactions
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
+	"unicode"
 )
+
+func round2dp(f float64) float64 {
+	return math.Round(f*100) / 100
+}
+
+func lowerCamelKey(key string) string {
+	if key == "" {
+		return key
+	}
+	r := []rune(key)
+	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
+func normalizeJSONKeysLowerCamel(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(t))
+		for k, v2 := range t {
+			out[lowerCamelKey(k)] = normalizeJSONKeysLowerCamel(v2)
+		}
+		return out
+	case []interface{}:
+		for i := range t {
+			t[i] = normalizeJSONKeysLowerCamel(t[i])
+		}
+		return t
+	default:
+		return v
+	}
+}
 
 func formatMoney2dp(v interface{}) interface{} {
 	if v == nil {
@@ -14,22 +47,22 @@ func formatMoney2dp(v interface{}) interface{} {
 
 	switch t := v.(type) {
 	case float64:
-		return fmt.Sprintf("%.2f", t)
+		return round2dp(t)
 	case float32:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case int:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case int64:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case int32:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case uint:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case uint64:
-		return fmt.Sprintf("%.2f", float64(t))
+		return round2dp(float64(t))
 	case json.Number:
 		if f, err := t.Float64(); err == nil {
-			return fmt.Sprintf("%.2f", f)
+			return round2dp(f)
 		}
 		return t.String()
 	case []byte:
@@ -40,7 +73,7 @@ func formatMoney2dp(v interface{}) interface{} {
 			return t
 		}
 		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			return fmt.Sprintf("%.2f", f)
+			return round2dp(f)
 		}
 		return t
 	default:
@@ -50,7 +83,7 @@ func formatMoney2dp(v interface{}) interface{} {
 			return v
 		}
 		if f, err := strconv.ParseFloat(s, 64); err == nil {
-			return fmt.Sprintf("%.2f", f)
+			return round2dp(f)
 		}
 		return v
 	}
@@ -66,7 +99,7 @@ func isMoneyKey(key string) bool {
 }
 
 // FormatMoneyFields2dp mutates the provided row map, formatting money-related fields
-// (amount/moneyIn/moneyOut/balance/fee) to a string with exactly 2 decimals.
+// (amount/moneyIn/moneyOut/balance/fee) to a number (float64) rounded to 2 decimals.
 func FormatMoneyFields2dp(row map[string]interface{}) {
 	for k, v := range row {
 		if !isMoneyKey(k) {
