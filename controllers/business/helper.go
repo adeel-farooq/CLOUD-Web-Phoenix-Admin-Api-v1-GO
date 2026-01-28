@@ -291,7 +291,7 @@ func BuildBusinessListSPParamsNetLike(q admin.QueryRecordList, siteUsersId int) 
 		// SP signature has these
 		"Filters":      nilIfEmpty(q.Filters),
 		"SortBy":       nilIfEmpty(q.SortBy),
-		"SearchString": nil, // IMPORTANT: This SP builds its own SQL; keep NULL unless you really build it.
+		"SearchString": nilIfEmpty(q.Search), // IMPORTANT: This SP builds its own SQL; keep NULL unless you really build it.
 
 		"RawFilterString": nilIfEmpty(q.Filters),
 		"RawSortString":   nilIfEmpty(q.SortBy),
@@ -590,6 +590,464 @@ func BusinessColumns() []map[string]interface{} {
 			"labelKey":       "bNewAccountAvailable",
 			"labelValue":     "bNewAccountAvailable",
 			"orderNumber":    15,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+	}
+}
+
+func CustomerColumns() []map[string]interface{} {
+	return []map[string]interface{}{
+		// 1) CustomerUsers__Id
+		{
+			"columnKey":   "CustomerUsers__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 1,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true, // .NET me visible explicitly false nahi hai
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 2) CustomerUsersCustomers__Id (hidden)
+		{
+			"columnKey":   "CustomerUsersCustomers__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 2,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    false, // bVisible=false
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 3) Customers__Id (hidden)
+		{
+			"columnKey":   "Customers__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 3,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    false, // bVisible=false
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 4) CustomerUsers__CustomerUsersCode (LabelValue="Code", searchable/filterable/sortable)
+		{
+			"columnKey":   "CustomerUsers__CustomerUsersCode",
+			"labelKey":    "CustomerUsersCode",
+			"labelValue":  "Code",
+			"orderNumber": 4,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 5) Licensees__LicenseeName (LabelValue="Licensee")
+		{
+			"columnKey":      "Licensees__LicenseeName",
+			"labelKey":       "LicenseeName",
+			"labelValue":     "Licensee",
+			"orderNumber":    5,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+
+		// 6) LicenseesBrands__SiteName (LabelValue="Licensee Brand")
+		{
+			"columnKey":      "LicenseesBrands__SiteName",
+			"labelKey":       "SiteName",
+			"labelValue":     "Licensee Brand",
+			"orderNumber":    6,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+
+		// 7) Customers__AccountType (SingleChoice: Business,Personal,VirtualBusiness,VirtualPersonal)
+		{
+			"columnKey":   "Customers__AccountType",
+			"labelKey":    "AccountType",
+			"labelValue":  "AccountType",
+			"orderNumber": 7,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "Business", "label": "Business"},
+						{"value": "Personal", "label": "Personal"},
+						{"value": "VirtualBusiness", "label": "VirtualBusiness"},
+						{"value": "VirtualPersonal", "label": "VirtualPersonal"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 8) Customers__bVirtual (LabelValue="Virtual", SingleChoice 0/1)
+		{
+			"columnKey":   "Customers__bVirtual",
+			"labelKey":    "bVirtual",
+			"labelValue":  "Virtual",
+			"orderNumber": 8,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "No"},
+						{"value": "1", "label": "Yes"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 9) Customers__CompanyName (hidden, not filterable/sortable)
+		{
+			"columnKey":      "Customers__CompanyName",
+			"labelKey":       "CompanyName",
+			"labelValue":     "CompanyName",
+			"orderNumber":    9,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false, // bVisible=false
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+
+		// 10) Customers__CompanyEmailAddress
+		{
+			"columnKey":   "Customers__CompanyEmailAddress",
+			"labelKey":    "CompanyEmailAddress",
+			"labelValue":  "CompanyEmailAddress",
+			"orderNumber": 10,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 11) CustomerUsers__FirstName
+		{
+			"columnKey":   "CustomerUsers__FirstName",
+			"labelKey":    "FirstName",
+			"labelValue":  "FirstName",
+			"orderNumber": 11,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 12) CustomerUsers__LastName
+		{
+			"columnKey":   "CustomerUsers__LastName",
+			"labelKey":    "LastName",
+			"labelValue":  "LastName",
+			"orderNumber": 12,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 13) SiteUsers__EmailAddress
+		{
+			"columnKey":   "SiteUsers__EmailAddress",
+			"labelKey":    "EmailAddress",
+			"labelValue":  "EmailAddress",
+			"orderNumber": 13,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 14) CustomerUsers__DateOfBirth (DateTime Range)
+		{
+			"columnKey":   "CustomerUsers__DateOfBirth",
+			"labelKey":    "DateOfBirth",
+			"labelValue":  "DateOfBirth",
+			"orderNumber": 14,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+
+		// 15) CustomerUsers__bDocumentVerified (LabelValue="Document Verified", SingleChoice)
+		{
+			"columnKey":   "CustomerUsers__bDocumentVerified",
+			"labelKey":    "bDocumentVerified",
+			"labelValue":  "Document Verified",
+			"orderNumber": 15,
+			"bSortable":   false,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Unverified"},
+						{"value": "1", "label": "Verified"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 16) CustomerUsers__bRequiresManualVerification (LabelValue="Requires Assistance", SingleChoice)
+		{
+			"columnKey":   "CustomerUsers__bRequiresManualVerification",
+			"labelKey":    "bRequiresManualVerification",
+			"labelValue":  "Requires Assistance",
+			"orderNumber": 16,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "No"},
+						{"value": "1", "label": "Yes"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 17) CustomerUsers__bEligibleForManualVerification (LabelValue="Manual Verification Allowed", SingleChoice)
+		{
+			"columnKey":   "CustomerUsers__bEligibleForManualVerification",
+			"labelKey":    "bEligibleForManualVerification",
+			"labelValue":  "Manual Verification Allowed",
+			"orderNumber": 17,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "No"},
+						{"value": "1", "label": "Yes"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 18) CustomerUsers__VerificationDate (DateTime Range)
+		{
+			"columnKey":   "CustomerUsers__VerificationDate",
+			"labelKey":    "VerificationDate",
+			"labelValue":  "VerificationDate",
+			"orderNumber": 18,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+
+		// 19) CustomerUsers__VerificationStatus
+		{
+			"columnKey":   "CustomerUsers__VerificationStatus",
+			"labelKey":    "VerificationStatus",
+			"labelValue":  "VerificationStatus",
+			"orderNumber": 19,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+
+		// 20) SiteUsers__bSuppressed (LabelValue="Suppressed", SingleChoice Active/Inactive)
+		{
+			"columnKey":   "SiteUsers__bSuppressed",
+			"labelKey":    "bSuppressed",
+			"labelValue":  "Suppressed",
+			"orderNumber": 20,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Active"},
+						{"value": "1", "label": "Inactive"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 21) Customers__bFrozen (LabelValue="Frozen", SingleChoice Unfrozen/Frozen)
+		{
+			"columnKey":   "Customers__bFrozen",
+			"labelKey":    "bFrozen",
+			"labelValue":  "Frozen",
+			"orderNumber": 21,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Unfrozen"},
+						{"value": "1", "label": "Frozen"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+
+		// 22) CustomerUsers__AddDate (DateTime Range)
+		{
+			"columnKey":   "CustomerUsers__AddDate",
+			"labelKey":    "AddDate",
+			"labelValue":  "Add Date",
+			"orderNumber": 22,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+
+		// 23) CustomerUsers__bApiConfigurable (hidden)
+		{
+			"columnKey":      "CustomerUsers__bApiConfigurable",
+			"labelKey":       "bApiConfigurable",
+			"labelValue":     "bApiConfigurable",
+			"orderNumber":    23,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+
+		// 24) CustomerUsersAvailableAccounts__bNewAccountAvailable (hidden)
+		{
+			"columnKey":      "CustomerUsersAvailableAccounts__bNewAccountAvailable",
+			"labelKey":       "bNewAccountAvailable",
+			"labelValue":     "bNewAccountAvailable",
+			"orderNumber":    24,
 			"bSortable":      false,
 			"bFilterable":    false,
 			"bVisible":       false,

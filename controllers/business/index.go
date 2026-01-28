@@ -2,6 +2,7 @@
 package business
 
 import (
+	"fmt"
 	"net/http"
 
 	"cloud-web-phoenix-customer-v1-go/controllers/admin"
@@ -238,6 +239,79 @@ func GetBusinessList(c *gin.Context) {
 	}
 
 	cols := NormalizeColumnsDetailsNull(BusinessColumns())
+
+	c.JSON(200, gin.H{
+		"id":     siteUsersId,
+		"status": "1",
+		"errors": []string{},
+		"details": BuildListDetailsNetLike(
+			cols,
+			listData,
+			q,
+			total,
+			[]map[string]string{},
+		),
+	})
+}
+func GetCustomerList(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+
+	// query params
+	q := admin.ParseQueryRecordList(c.Request.URL.Query())
+	fmt.Println(q)
+
+	ex := admin.LoadListSelections(siteUsersId, "CustomerUsers")
+	admin.OverrideWithSelections(&q, ex)
+
+	// ✅ SP
+	spName := "v1_AdminRole_CustomersModule_List"
+
+	// ✅ VERY IMPORTANT: empty -> NULL (NOT empty string)
+	spParams := BuildBusinessListSPParamsNetLike(q, siteUsersId)
+
+	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+	// ✅ .NET style: list endpoint pe SP error => 200 with details.errors (status "1")
+	if err != nil {
+		cols := NormalizeColumnsDetailsNull(CustomerColumns())
+
+		c.JSON(200, gin.H{
+			"id":     siteUsersId,
+			"status": "1",
+			"errors": []string{},
+			"details": BuildListDetailsNetLike(
+				cols,
+				[]map[string]interface{}{},
+				q,
+				0,
+				[]map[string]string{{"message": err.Error()}},
+			),
+		})
+		return
+	}
+
+	rows := admin.AsRows(res)
+
+	total := 0
+	if len(rows) > 0 {
+		if v, ok := rows[0]["HowManyResults"]; ok {
+			total = toInt(v)
+		}
+	}
+
+	// ✅ listData: .NET response me keys lowercase-first hoti hain
+	listData := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		item := admin.NormalizeRowKeys(row) // removes RowNum/HowManyResults + lowercases first char
+		listData = append(listData, item)
+	}
+
+	cols := NormalizeColumnsDetailsNull(CustomerColumns())
 
 	c.JSON(200, gin.H{
 		"id":     siteUsersId,
