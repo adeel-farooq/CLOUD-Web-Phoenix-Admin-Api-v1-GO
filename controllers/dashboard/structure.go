@@ -73,3 +73,38 @@ type AdminUsersListResponse struct {
 	Status  string                `json:"status"`
 	Errors  []string              `json:"errors"`
 }
+
+type listProductsAccountRaw struct {
+	OperationalAssetAccountsID interface{} `json:"OperationalAssetAccountsID"`
+	AccountName                interface{} `json:"AccountName"`
+	AssetCode                  interface{} `json:"AssetCode"`
+	Balance                    interface{} `json:"Balance"`
+	TopUpThreshold             interface{} `json:"TopUpThreshold"`
+}
+
+type listProductsProductRaw struct {
+	ProductId   interface{}              `json:"ProductId"`
+	ProductName interface{}              `json:"ProductName"`
+	Accounts    []listProductsAccountRaw `json:"Accounts"`
+}
+
+type listProductsAccountOut struct {
+	OperationalAssetAccountsID interface{} `json:"operationalAssetAccountsID"`
+	AccountName                interface{} `json:"accountName"`
+	AssetCode                  interface{} `json:"assetCode"`
+	Balance                    interface{} `json:"balance"`
+	TopUpThreshold             interface{} `json:"topUpThreshold"`
+}
+
+type listProductsProductOut struct {
+	ProductId   interface{}              `json:"productId"`
+	ProductName interface{}              `json:"productName"`
+	Accounts    []listProductsAccountOut `json:"accounts"`
+}
+
+type listProductsResponse struct {
+	Id      interface{}              `json:"id"`
+	Details []listProductsProductOut `json:"details"`
+	Status  interface{}              `json:"status"`
+	Errors  []interface{}            `json:"errors"`
+}

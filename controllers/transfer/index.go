@@ -51,7 +51,7 @@ func GetOutboundTransferList(c *gin.Context) {
 			"OperationalAssetAccountsExternalTransfers.Reference",
 			"Assets.Code",
 			"Assets.Name",
-			"TransferStatus.Status",
+			// "TransferStatus.Status",
 			"Products.ProductName",
 		},
 	})

@@ -4,6 +4,7 @@ import (
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
 	"cloud-web-phoenix-customer-v1-go/db"
 	"encoding/json"
+	"net/http"
 
 	"strings"
 
@@ -14,7 +15,7 @@ func ProductsList(c *gin.Context) {
 
 	user := auth.ExtractUser(c)
 	if user == nil {
-		c.JSON(401, gin.H{"message": "Unauthorized"})
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
 		return
 	}
 
@@ -28,28 +29,51 @@ func ProductsList(c *gin.Context) {
 	)
 
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	result, ok := auth.AsSingleRow(res)
 	if !ok {
-		c.JSON(500, gin.H{"error": "Invalid SP response"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid SP response"})
 		return
 	}
 
 	// ---- Parse Details JSON ----
-	var products []map[string]interface{}
-	if detailsStr, ok := result["Details"].(string); ok {
-		_ = json.Unmarshal([]byte(detailsStr), &products)
+	var productsRaw []listProductsProductRaw
+	if detailsStr, ok := result["Details"].(string); ok && detailsStr != "" {
+		cleanJSON := strings.ReplaceAll(detailsStr, "'", "\"")
+		_ = json.Unmarshal([]byte(cleanJSON), &productsRaw)
 	}
 
-	c.JSON(200, gin.H{
-		"id":      result["Id"],
-		"details": products,
-		"status":  result["Status"],
-		"errors":  []interface{}{},
-		"message": "Products fetched successfully",
+	productsOut := make([]listProductsProductOut, 0, len(productsRaw))
+	for _, p := range productsRaw {
+		out := listProductsProductOut{
+			ProductId:   p.ProductId,
+			ProductName: p.ProductName,
+			Accounts:    nil,
+		}
+		if len(p.Accounts) > 0 {
+			accOut := make([]listProductsAccountOut, 0, len(p.Accounts))
+			for _, a := range p.Accounts {
+				accOut = append(accOut, listProductsAccountOut{
+					OperationalAssetAccountsID: a.OperationalAssetAccountsID,
+					AccountName:                a.AccountName,
+					AssetCode:                  a.AssetCode,
+					Balance:                    a.Balance,
+					TopUpThreshold:             a.TopUpThreshold,
+				})
+			}
+			out.Accounts = accOut
+		}
+		productsOut = append(productsOut, out)
+	}
+
+	c.JSON(http.StatusOK, listProductsResponse{
+		Id:      result["Id"],
+		Details: productsOut,
+		Status:  result["Status"],
+		Errors:  []interface{}{},
 	})
 }
 

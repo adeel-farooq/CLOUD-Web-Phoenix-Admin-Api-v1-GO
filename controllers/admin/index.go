@@ -93,7 +93,7 @@ func GetUserCounts(c *gin.Context) {
 	}
 
 	// ---------- Parse Details JSON safely ----------
-	var details interface{} = []interface{}{}
+	var details UserCount
 
 	if raw, ok := result["Details"].(string); ok && raw != "" {
 		cleanJSON := strings.ReplaceAll(raw, "'", "\"")

@@ -209,7 +209,40 @@ func ConvertSortToSQL(sortStr string, colMap map[string]string) string {
 	if len(out) == 0 {
 		return ""
 	}
-	return " ORDER BY " + strings.Join(out, ", ")
+	return strings.Join(out, ", ")
+}
+
+// ConvertSortToSP converts the frontend sort string into the value we pass to SQL stored procedures.
+// Many SPs expect column *keys* (e.g. "AdminUsers__AdminUsersCode DESC"), not SQL column names.
+// We still validate the keys against the whitelist ColumnMap.
+func ConvertSortToSP(sortStr string, colMap map[string]string) string {
+	sortStr = strings.TrimSpace(sortStr)
+	if sortStr == "" {
+		return ""
+	}
+
+	parts := strings.Split(sortStr, "|")
+	out := []string{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		chunks := strings.Fields(p)
+		if len(chunks) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(chunks[0])
+		dir := strings.ToUpper(strings.TrimSpace(chunks[1]))
+		if dir != "ASC" && dir != "DESC" {
+			continue
+		}
+		if _, ok := resolveColumn(colMap, key); !ok {
+			continue
+		}
+		out = append(out, UppercaseFirstChar(key)+" "+dir)
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, ", ")
 }
 
 func ConvertFiltersToSQL(filterStr string, colMap map[string]string) string {
@@ -281,7 +314,7 @@ func ConvertSearchToSQL(search string, fields []string) string {
 	if len(orParts) == 0 {
 		return ""
 	}
-	return " AND (" + strings.Join(orParts, " OR ") + ")"
+	return " WHERE (" + strings.Join(orParts, " OR ") + ")"
 }
 
 // --------------------
@@ -305,8 +338,8 @@ func BuildListSPParams(q QueryRecordList, siteUsersId int, cfg ListSPConfig) map
 		}
 	}
 	if strings.TrimSpace(q.SortBy) != "" {
-		if sqlSort := ConvertSortToSQL(q.SortBy, cfg.ColumnMap); sqlSort != "" {
-			params["SortBy"] = sqlSort
+		if spSort := ConvertSortToSP(q.SortBy, cfg.ColumnMap); spSort != "" {
+			params["SortBy"] = spSort
 		}
 	}
 	if strings.TrimSpace(q.Search) != "" {
@@ -627,6 +660,15 @@ func LowercaseFirstChar(s string) string {
 	}
 	r := []rune(s)
 	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
+func UppercaseFirstChar(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
 	return string(r)
 }
 

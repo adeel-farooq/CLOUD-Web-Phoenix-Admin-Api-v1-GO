@@ -130,3 +130,9 @@ type KV struct {
 	Label string `json:"label"`
 	Value int    `json:"value"`
 }
+type UserCount struct {
+	TotalBusinessUsers    int `json:"totalBusinessUsers"`
+	TotalPersonalUsers    int `json:"totalPersonalUsers"`
+	VerifiedBusinessUsers int `json:"verifiedBusinessUsers"`
+	VerifiedPersonalUsers int `json:"verifiedPersonalUsers"`
+}

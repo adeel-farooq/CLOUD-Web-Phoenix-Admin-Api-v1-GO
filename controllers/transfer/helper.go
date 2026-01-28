@@ -248,8 +248,8 @@ func BuildOutboundTransferParamsNetLike(q admin.QueryRecordList, siteUsersId int
 	// Generated fragments should be NULL if not applicable (never empty string)
 	var sortByParam interface{} = nil
 	if rawSort != "" {
-		if sqlSort := admin.ConvertSortToSQL(rawSort, cfg.ColumnMap); strings.TrimSpace(sqlSort) != "" {
-			sortByParam = sqlSort
+		if spSort := admin.ConvertSortToSP(rawSort, cfg.ColumnMap); strings.TrimSpace(spSort) != "" {
+			sortByParam = spSort
 		}
 	}
 
