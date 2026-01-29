@@ -2,7 +2,6 @@
 package business
 
 import (
-	"fmt"
 	"net/http"
 
 	"cloud-web-phoenix-customer-v1-go/controllers/admin"
@@ -198,8 +197,15 @@ func GetBusinessList(c *gin.Context) {
 	// ✅ SP
 	spName := "v1_AdminRole_BusinessModule_List"
 
+	cfg := admin.ListSPConfig{
+		ListKey:      "Business",
+		TrackingID:   "DefaultTrackingID",
+		ColumnMap:    BusinessColumnMap(),
+		SearchFields: BusinessSearchFields(),
+	}
+
 	// ✅ VERY IMPORTANT: empty -> NULL (NOT empty string)
-	spParams := BuildBusinessListSPParamsNetLike(q, siteUsersId)
+	spParams := BuildBusinessListSPParamsNetLike(q, siteUsersId, cfg)
 
 	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
 
@@ -263,7 +269,6 @@ func GetCustomerList(c *gin.Context) {
 
 	// query params
 	q := admin.ParseQueryRecordList(c.Request.URL.Query())
-	fmt.Println(q)
 
 	ex := admin.LoadListSelections(siteUsersId, "CustomerUsers")
 	admin.OverrideWithSelections(&q, ex)
@@ -271,8 +276,15 @@ func GetCustomerList(c *gin.Context) {
 	// ✅ SP
 	spName := "v1_AdminRole_CustomersModule_List"
 
+	cfg := admin.ListSPConfig{
+		ListKey:      "CustomerUsers",
+		TrackingID:   "DefaultTrackingID",
+		ColumnMap:    CustomerUsersColumnMap(),
+		SearchFields: CustomerUsersSearchFields(),
+	}
+
 	// ✅ VERY IMPORTANT: empty -> NULL (NOT empty string)
-	spParams := BuildBusinessListSPParamsNetLike(q, siteUsersId)
+	spParams := BuildCustomerListSPParamsNetLike(q, siteUsersId, cfg)
 
 	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
 

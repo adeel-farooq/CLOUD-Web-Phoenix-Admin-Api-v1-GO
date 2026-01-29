@@ -150,6 +150,80 @@ func CustomerAssetAccountsSearchFields() []string {
 	}
 }
 
+// Business module (v1_AdminRole_BusinessModule_List)
+func BusinessColumnMap() map[string]string {
+	return map[string]string{
+		"Customers__Id":                                    "Customers.Id",
+		"Customers__CustomersCode":                         "Customers.CustomersCode",
+		"LicenseesBrands__StatementDescriptor":             "LicenseesBrands.StatementDescriptor",
+		"Customers__CompanyName":                           "Customers.CompanyName",
+		"Customers__CompanyEmailAddress":                   "Customers.CompanyEmailAddress",
+		"Customers__bBusinessDocumentsVerified":            "Customers.bBusinessDocumentsVerified",
+		"Customers__bFinancialInstitution":                 "Customers.bFinancialInstitution",
+		"Customers__bAllDocumentsSubmitted":                "Customers.bAllDocumentsSubmitted",
+		"Customers__bVirtual":                              "Customers.bVirtual",
+		"Customers__BusinessVerificationStatus":            "Customers.BusinessVerificationStatus",
+		"Customers__bSubmittedForm":                        "Customers.bSubmittedForm",
+		"Customers__bFrozen":                               "Customers.bFrozen",
+		"Customers__AddDate":                               "Customers.AddDate",
+		"CustomerUsers__Id":                                "CustomerUsers.Id",
+		"CustomersAvailableAccounts__bNewAccountAvailable": "CustomersAvailableAccounts.bNewAccountAvailable",
+	}
+}
+
+func BusinessSearchFields() []string {
+	return []string{
+		"Customers.CustomersCode",
+		"LicenseesBrands.StatementDescriptor",
+		"Customers.CompanyName",
+		"Customers.CompanyEmailAddress",
+		"Customers.BusinessVerificationStatus",
+	}
+}
+
+// Customer users module (v1_AdminRole_CustomersModule_List)
+func CustomerUsersColumnMap() map[string]string {
+	return map[string]string{
+		"CustomerUsers__Id":                                    "CustomerUsers.Id",
+		"CustomerUsersCustomers__Id":                           "CustomerUsersCustomers.Id",
+		"Customers__Id":                                        "Customers.Id",
+		"CustomerUsers__CustomerUsersCode":                     "CustomerUsers.CustomerUsersCode",
+		"Licensees__LicenseeName":                              "Licensees.LicenseeName",
+		"LicenseesBrands__SiteName":                            "LicenseesBrands.SiteName",
+		"Customers__AccountType":                               "Customers.AccountType",
+		"Customers__bVirtual":                                  "Customers.bVirtual",
+		"Customers__CompanyName":                               "Customers.CompanyName",
+		"Customers__CompanyEmailAddress":                       "Customers.CompanyEmailAddress",
+		"CustomerUsers__FirstName":                             "CustomerUsers.FirstName",
+		"CustomerUsers__LastName":                              "CustomerUsers.LastName",
+		"SiteUsers__EmailAddress":                              "SiteUsers.EmailAddress",
+		"CustomerUsers__DateOfBirth":                           "CustomerUsers.DateOfBirth",
+		"CustomerUsers__bDocumentVerified":                     "CustomerUsers.bDocumentVerified",
+		"CustomerUsers__bRequiresManualVerification":           "CustomerUsers.bRequiresManualVerification",
+		"CustomerUsers__bEligibleForManualVerification":        "CustomerUsers.bEligibleForManualVerification",
+		"CustomerUsers__VerificationDate":                      "CustomerUsers.VerificationDate",
+		"CustomerUsers__VerificationStatus":                    "CustomerUsers.VerificationStatus",
+		"SiteUsers__bSuppressed":                               "SiteUsers.bSuppressed",
+		"Customers__bFrozen":                                   "Customers.bFrozen",
+		"CustomerUsers__AddDate":                               "CustomerUsers.AddDate",
+		"CustomerUsers__bApiConfigurable":                      "CustomerUsers.bApiConfigurable",
+		"CustomerUsersAvailableAccounts__bNewAccountAvailable": "CustomerUsersAvailableAccounts.bNewAccountAvailable",
+	}
+}
+
+func CustomerUsersSearchFields() []string {
+	return []string{
+		"CustomerUsers.CustomerUsersCode",
+		"Customers.CompanyName",
+		"CustomerUsers.FirstName",
+		"CustomerUsers.LastName",
+		"SiteUsers.EmailAddress",
+		"Licensees.LicenseeName",
+		"LicenseesBrands.SiteName",
+		"Customers.CustomersCode",
+	}
+}
+
 // Fixed columns: .NET parity (bFilterable false => filterMetadata nil)
 func CustomerAssetAccountsColumns() []map[string]interface{} {
 	return []map[string]interface{}{

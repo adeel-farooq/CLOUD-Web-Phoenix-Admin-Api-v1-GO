@@ -281,27 +281,69 @@ func toInt(v interface{}) int {
 }
 
 // .NET-like SP params for v1_AdminRole_BusinessModule_List
-func BuildBusinessListSPParamsNetLike(q admin.QueryRecordList, siteUsersId int) map[string]interface{} {
+func BuildBusinessListSPParamsNetLike(q admin.QueryRecordList, siteUsersId int, cfg admin.ListSPConfig) map[string]interface{} {
+	rawSort := strings.TrimSpace(q.SortBy)
+	rawFilter := strings.TrimSpace(q.Filters)
+	rawSearch := strings.TrimSpace(q.Search)
+
+	// RawSort/RawFilter -> NULL when empty
+	var rawSortParam interface{} = nil
+	if rawSort != "" {
+		rawSortParam = rawSort
+	}
+	var rawFilterParam interface{} = nil
+	if rawFilter != "" {
+		rawFilterParam = rawFilter
+	}
+
+	// Computed fragments -> NULL when empty
+	var sortByParam interface{} = nil
+	if rawSort != "" {
+		if spSort := admin.ConvertSortToSP(rawSort, cfg.ColumnMap); strings.TrimSpace(spSort) != "" {
+			sortByParam = spSort
+		}
+	}
+
+	var filtersParam interface{} = nil
+	if rawFilter != "" {
+		if sqlFilters := admin.ConvertFiltersToSQL(rawFilter, cfg.ColumnMap); strings.TrimSpace(sqlFilters) != "" {
+			filtersParam = sqlFilters
+		}
+	}
+
+	var searchParam interface{} = nil
+	if rawSearch != "" {
+		sqlSearch := strings.TrimSpace(admin.ConvertSearchToSQL(rawSearch, cfg.SearchFields))
+		if sqlSearch != "" {
+			if strings.HasPrefix(strings.ToUpper(sqlSearch), "AND ") {
+				sqlSearch = "WHERE 1=1 " + sqlSearch
+			}
+			searchParam = sqlSearch
+		}
+	}
+
 	return map[string]interface{}{
 		"User_SiteUsersID": siteUsersId,
+		"PageNumber":       q.PageNumber,
+		"PageSize":         q.PageSize,
+		"ListKey":          cfg.ListKey,
+		"TrackingID":       cfg.TrackingID,
 
-		"PageNumber": q.PageNumber,
-		"PageSize":   q.PageSize,
+		"RawSortString":   rawSortParam,
+		"RawFilterString": rawFilterParam,
+		"RawSearchString": rawSearch, // '' when empty
 
-		// SP signature has these
-		"Filters":      nilIfEmpty(q.Filters),
-		"SortBy":       nilIfEmpty(q.SortBy),
-		"SearchString": nilIfEmpty(q.Search), // IMPORTANT: This SP builds its own SQL; keep NULL unless you really build it.
-
-		"RawFilterString": nilIfEmpty(q.Filters),
-		"RawSortString":   nilIfEmpty(q.SortBy),
-
-		// RawSearchString: agar search empty hai to NULL bhejo
-		"RawSearchString": nilIfEmpty(q.Search),
-
-		"ListKey":    "Business",
-		"TrackingID": "DefaultTrackingID",
+		"SortBy":       sortByParam,
+		"Filters":      filtersParam,
+		"SearchString": searchParam,
+		// "Search":       nilIfEmpty(rawSearch),
 	}
+}
+
+// .NET-like SP params for v1_AdminRole_CustomersModule_List
+func BuildCustomerListSPParamsNetLike(q admin.QueryRecordList, siteUsersId int, cfg admin.ListSPConfig) map[string]interface{} {
+	// same behavior as business list, but ListKey differs
+	return BuildBusinessListSPParamsNetLike(q, siteUsersId, cfg)
 }
 
 func NormalizeColumnsDetailsNull(cols []map[string]interface{}) []map[string]interface{} {
