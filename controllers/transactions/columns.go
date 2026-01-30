@@ -1,5 +1,31 @@
 package transactions
 
+import "encoding/json"
+
+func deepCopyColumnMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	// Column definitions are nested maps/slices; JSON round-trip is the simplest safe deep-copy.
+	b, err := json.Marshal(in)
+	if err != nil {
+		out := make(map[string]interface{}, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(b, &out); err != nil {
+		fallback := make(map[string]interface{}, len(in))
+		for k, v := range in {
+			fallback[k] = v
+		}
+		return fallback
+	}
+	return out
+}
+
 func ColumnsTransactionsListAll() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
@@ -968,4 +994,427 @@ func ColumnsTransactionsList() []map[string]interface{} {
 			"tooltip":        nil,
 		},
 	}
+}
+
+func ColumnsPendingTransactionsList() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"columnKey":   "CustomerAssetAccountsTransactions__Id",
+			"labelKey":    "Id",
+			"labelValue":  "Id",
+			"orderNumber": 1,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    false,
+			"bLocked":     false,
+			"type":        "Integer",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "Amount",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "CustomerAssetAccountsTransactions__Date",
+			"labelKey":    "Ticker",
+			"labelValue":  "Date",
+			"orderNumber": 2,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactions__Description",
+			"labelKey":       "Description",
+			"labelValue":     "Description",
+			"orderNumber":    3,
+			"bSortable":      true,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactions__Amount",
+			"labelKey":       "Amount",
+			"labelValue":     "Amount",
+			"orderNumber":    4,
+			"bSortable":      true,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "Decimal",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "TransactionAmounts__Fee",
+			"labelKey":       "Fee",
+			"labelValue":     "Fee",
+			"orderNumber":    5,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "Decimal",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "TransactionAmounts__Balance",
+			"labelKey":       "Balance",
+			"labelValue":     "Balance",
+			"orderNumber":    6,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "Decimal",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "TransactionAmounts__InfoRequest",
+			"labelKey":    "InfoRequest",
+			"labelValue":  "Info Request",
+			"orderNumber": 7,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactionScreenings__bAlertsAvailable",
+			"labelKey":       "bAlertsAvailable",
+			"labelValue":     "Alerts Available",
+			"orderNumber":    8,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactions__bInsufficientOpAccountBalance",
+			"labelKey":       "bInsufficientOpAccountBalance",
+			"labelValue":     "Insufficient Funds",
+			"orderNumber":    9,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "Assets__Code",
+			"labelKey":    "Asset",
+			"labelValue":  "Asset",
+			"orderNumber": 10,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "Customers__Id",
+			"labelKey":       "CustomersID",
+			"labelValue":     "Cus. ID",
+			"orderNumber":    11,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Integer",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "Customers__CustomersCode",
+			"labelKey":    "CustomersCode",
+			"labelValue":  "Cst. Code",
+			"orderNumber": 12,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "CustomerUsers__FullName",
+			"labelKey":    "CustomersName",
+			"labelValue":  "Cst. Name",
+			"orderNumber": 13,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "Customers__CompanyName",
+			"labelKey":    "BusinessName",
+			"labelValue":  "Business",
+			"orderNumber": 14,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "LicenseesBrands__StatementDescriptor",
+			"labelKey":    "LicenseesBrand",
+			"labelValue":  "Brand",
+			"orderNumber": 15,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "ExternalAssetWallets__WalletAddress",
+			"labelKey":       "WalletAddress",
+			"labelValue":     "Wallet Address",
+			"orderNumber":    16,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactions__TransactionHash",
+			"labelKey":       "TransactionHash",
+			"labelValue":     "Transaction Hash",
+			"orderNumber":    17,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       true,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "WidgetClientUsers__WidgetClientUsersCode",
+			"labelKey":    "WidgetClientUsersCode",
+			"labelValue":  "Widget Code",
+			"orderNumber": 18,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "FeeIncurringActions__DisplayName",
+			"labelKey":    "TransactionType",
+			"labelValue":  "Type",
+			"orderNumber": 19,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "CustomerAssetAccountsTransactions__ExternalId",
+			"labelKey":       "ExternalID",
+			"labelValue":     "External ID",
+			"orderNumber":    20,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "String",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "Assets__MaxDecimalPrecision",
+			"labelKey":       "MaxDecimalPrecision",
+			"labelValue":     "MaxDecimalPrecision",
+			"orderNumber":    21,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Integer",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "Products__ProductName",
+			"labelKey":    "ProductName",
+			"labelValue":  "Product",
+			"orderNumber": 22,
+			"bSortable":   false,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    nil,
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":      "bCancelAvailable",
+			"labelKey":       "bCancelAvailable",
+			"labelValue":     "Cancel Available",
+			"orderNumber":    23,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "bMarkAsPendingAvailable",
+			"labelKey":       "bMarkAsPendingAvailable",
+			"labelValue":     "Mark As Pending Available",
+			"orderNumber":    24,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "bCompleteAvailable",
+			"labelKey":       "bCompleteAvailable",
+			"labelValue":     "Complete Available",
+			"orderNumber":    25,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":      "bAssignAvailable",
+			"labelKey":       "bAssignAvailable",
+			"labelValue":     "Assign Available",
+			"orderNumber":    26,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Boolean",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+	}
+}
+
+func ColumnsPendingTransactionsTreasuryList() []map[string]interface{} {
+	base := ColumnsPendingTransactionsList()
+	refCol := map[string]interface{}{
+		"columnKey":      "CustomerAssetAccountsTransactions__Refference",
+		"labelKey":       "Refference",
+		"labelValue":     "Refference",
+		"bSortable":      true,
+		"bFilterable":    false,
+		"bVisible":       true,
+		"bLocked":        false,
+		"type":           "String",
+		"filterMetadata": nil,
+		"tooltip":        nil,
+	}
+
+	out := make([]map[string]interface{}, 0, len(base)+1)
+	inserted := false
+	order := 1
+
+	for _, col := range base {
+		// Insert before Description to preserve the original first columns (Id, Date) ordering.
+		if !inserted {
+			if k, ok := col["columnKey"].(string); ok && k == "CustomerAssetAccountsTransactions__Description" {
+				c := deepCopyColumnMap(refCol)
+				c["orderNumber"] = order
+				out = append(out, c)
+				order++
+				inserted = true
+			}
+		}
+
+		c := deepCopyColumnMap(col)
+		c["orderNumber"] = order
+		out = append(out, c)
+		order++
+	}
+
+	// If the base list ever changes and Description isn't present, fall back to appending.
+	if !inserted {
+		c := deepCopyColumnMap(refCol)
+		c["orderNumber"] = order
+		out = append(out, c)
+	}
+
+	return out
 }

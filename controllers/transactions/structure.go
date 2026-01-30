@@ -240,3 +240,28 @@ var ViewAlertsMetadata = []FormMetadataDto{
 		Editable:    false,
 	},
 }
+
+type pendingProductsResponse struct {
+	Id      interface{}          `json:"id"`
+	Details []pendingProductsOut `json:"details"`
+	Status  interface{}          `json:"status"`
+	Errors  []interface{}        `json:"errors"`
+}
+
+type pendingProductsRaw struct {
+	ProductId               int     `json:"productId"`
+	ProductName             string  `json:"productName"`
+	Asset                   string  `json:"asset"`
+	DisplayName             string  `json:"displayName"`
+	Amount                  float64 `json:"amount"`
+	PendingTransactionCount int     `json:"pendingTransactionCount"`
+}
+
+type pendingProductsOut struct {
+	ProductId               int     `json:"productId"`
+	ProductName             string  `json:"productName"`
+	Asset                   string  `json:"asset"`
+	DisplayName             string  `json:"displayName"`
+	Amount                  float64 `json:"amount"`
+	PendingTransactionCount int     `json:"pendingTransactionCount"`
+}

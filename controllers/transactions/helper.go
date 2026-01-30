@@ -108,3 +108,73 @@ func FormatMoneyFields2dp(row map[string]interface{}) {
 		row[k] = formatMoney2dp(v)
 	}
 }
+
+func asFloat64(v interface{}) float64 {
+	if v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case int32:
+		return float64(t)
+	case uint64:
+		return float64(t)
+	case []byte:
+		f, _ := strconv.ParseFloat(string(t), 64)
+		return f
+	case string:
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
+	default:
+		f, _ := strconv.ParseFloat(fmt.Sprint(t), 64)
+		return f
+	}
+}
+
+func asInt(v interface{}) int {
+	if v == nil {
+		return 0
+	}
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case int32:
+		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case []byte:
+		i, _ := strconv.Atoi(string(t))
+		return i
+	case string:
+		i, _ := strconv.Atoi(t)
+		return i
+	default:
+		i, _ := strconv.Atoi(fmt.Sprint(t))
+		return i
+	}
+}
+
+func asString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return fmt.Sprint(t)
+	}
+}
