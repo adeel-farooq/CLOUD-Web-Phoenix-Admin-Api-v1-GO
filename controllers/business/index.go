@@ -2,7 +2,11 @@
 package business
 
 import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"cloud-web-phoenix-customer-v1-go/controllers/admin"
 	"cloud-web-phoenix-customer-v1-go/controllers/auth"
@@ -337,4 +341,99 @@ func GetCustomerList(c *gin.Context) {
 			[]map[string]string{},
 		),
 	})
+}
+func GetProductList(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	// This endpoint returns all products; SP call should not receive list/query params.
+	siteUsersId := 0
+
+	// ✅ SP (no params)
+	spName := "v1_AdminRole_CustomersModule_GetAllProducts"
+	res, err := auth.ExecSP(db.DB, spName, nil, 2)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(200, gin.H{
+				"id":      siteUsersId,
+				"details": []map[string]interface{}{},
+				"status":  "1",
+				"errors":  []string{},
+			})
+			return
+		}
+		c.JSON(200, gin.H{
+			"id":      siteUsersId,
+			"details": []map[string]interface{}{},
+			"status":  "0",
+			"errors":  []string{err.Error()},
+		})
+		return
+	}
+
+	rows := admin.AsRows(res)
+
+	// Some SPs return a single row where Details is a JSON string (array).
+	// In that case, parse it and return the parsed list directly.
+	if len(rows) == 1 {
+		var detailsRaw string
+		if v, ok := rows[0]["Details"]; ok && v != nil {
+			detailsRaw = strings.TrimSpace(toString(v))
+		} else if v, ok := rows[0]["details"]; ok && v != nil {
+			detailsRaw = strings.TrimSpace(toString(v))
+		}
+		if detailsRaw != "" {
+			var parsed interface{}
+			b := []byte(detailsRaw)
+			if err := json.Unmarshal(b, &parsed); err != nil {
+				// Some SPs return JSON using single quotes
+				clean := strings.ReplaceAll(detailsRaw, "'", "\"")
+				_ = json.Unmarshal([]byte(clean), &parsed)
+			}
+
+			if arr, ok := parsed.([]interface{}); ok {
+				out := make([]map[string]interface{}, 0, len(arr))
+				for _, it := range arr {
+					if m, ok := it.(map[string]interface{}); ok {
+						out = append(out, NormalizeRowNetLike(m))
+					}
+				}
+				c.JSON(200, gin.H{
+					"id":      siteUsersId,
+					"details": out,
+					"status":  "1",
+					"errors":  []string{},
+				})
+				return
+			}
+		}
+	}
+
+	out := make([]map[string]interface{}, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, NormalizeRowNetLike(row))
+	}
+
+	c.JSON(200, gin.H{
+		"id":      siteUsersId,
+		"details": out,
+		"status":  "1",
+		"errors":  []string{},
+	})
+}
+
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		return strings.TrimSpace(fmt.Sprint(t))
+	}
 }

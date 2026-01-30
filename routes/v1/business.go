@@ -12,5 +12,6 @@ func RegisterBusinessRoutes(router *gin.RouterGroup) {
 	router.GET("/customerassetaccountsmodule/list", business.GetCustomerAssetAccountsList)
 	router.GET("/businessmodule/list", business.GetBusinessList)
 	router.GET("/customersmodule/list", business.GetCustomerList)
+	router.GET("/customersmodule/get-all-products", business.GetProductList)
 
 }
