@@ -265,3 +265,76 @@ type pendingProductsOut struct {
 	Amount                  float64 `json:"amount"`
 	PendingTransactionCount int     `json:"pendingTransactionCount"`
 }
+
+type spNotesEnvelope struct {
+	Notes []spNoteItem `json:"Notes"`
+}
+
+type spNoteItem struct {
+	Id        int    `json:"Id"`
+	Text      string `json:"Text"`
+	AddDate   string `json:"AddDate"`
+	AddedBy   string `json:"AddedBy"`
+	BPinned   bool   `json:"bPinned"`
+	BEditable bool   `json:"bEditable"`
+}
+
+type apiNoteItem struct {
+	Id        string `json:"id"`
+	Text      string `json:"text"`
+	AddDate   string `json:"addDate"`
+	AddedBy   string `json:"addedBy"`
+	BEditable bool   `json:"bEditable"`
+	BPinned   bool   `json:"bPinned"`
+}
+
+type transactionJSONResponse struct {
+	Id      interface{}   `json:"id"`
+	Details interface{}   `json:"details"` // string OR nil
+	Status  interface{}   `json:"status"`
+	Errors  []interface{} `json:"errors"`
+}
+
+type transactionNote struct {
+	Id        string `json:"id"`
+	Text      string `json:"text"`
+	AddDate   string `json:"addDate"`
+	AddedBy   string `json:"addedBy"`
+	BEditable bool   `json:"bEditable"`
+	BPinned   bool   `json:"bPinned"`
+}
+
+type addNoteResponse struct {
+	Id      interface{}   `json:"id"`
+	Details interface{}   `json:"details"`
+	Status  interface{}   `json:"status"`
+	Errors  []interface{} `json:"errors"`
+}
+
+type addNoteDetails struct {
+	TransactionsId int64  `json:"transactionsId"`
+	Text           string `json:"text"`
+}
+
+type editNoteResponse struct {
+	Id      interface{}   `json:"id"`
+	Details interface{}   `json:"details"`
+	Status  interface{}   `json:"status"`
+	Errors  []interface{} `json:"errors"`
+}
+
+type editNoteDetails struct {
+	Id        string `json:"id"`
+	Text      string `json:"text"`
+	BEditable bool   `json:"bEditable"`
+}
+
+type pinNoteRequest struct {
+	Id      string `json:"id"`
+	BPinned bool   `json:"bPinned"`
+}
+
+type pinNoteDetails struct {
+	Id      string `json:"id"`
+	BPinned bool   `json:"bPinned"`
+}

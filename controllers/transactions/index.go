@@ -872,6 +872,691 @@ func ListPendingTreasuryProducts(c *gin.Context) {
 	})
 }
 
+func TransactionJSON(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	// Query params: Id + transactionsId (both appear in your URL)
+	idStr := c.Query("Id")
+	trxIdStr := c.Query("transactionsId")
+
+	// Decide "requested id" for the "no result" response
+	// In your sample, when no result: id = 249074 (the request value)
+	requestedID := parseInt64Prefer(trxIdStr, idStr)
+
+	if requestedID == 0 {
+		// If caller didn't send a valid number, follow your existing API style
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "Missing or invalid Id/transactionsId",
+		})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+
+	// ✅ SP NAME (adjust if your DB uses a slightly different name)
+	// Based on your endpoint: /transactionsmodule/transaction-json
+
+	const spName = "v1_AdminRole_TransactionsModule_GetTransactionJson"
+
+	// ✅ Params: include both ids because your endpoint includes both.
+	// Also include SiteUsersId because many AdminRole SPs require it.
+	params := map[string]interface{}{
+		"SiteUsersId": siteUsersId,
+		// "Id":             requestedID,
+		"CustomerAssetAccountsTransactionsId": requestedID,
+	}
+
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		// If SP returns no rows, your API still returns status=1 with details=null
+		if err.Error() == "sql: no rows in result set" {
+			c.JSON(http.StatusOK, transactionJSONResponse{
+				Id:      requestedID,
+				Details: nil,
+				Status:  "1",
+				Errors:  []interface{}{},
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		// Treat as "no result" to match your sample response
+		c.JSON(http.StatusOK, transactionJSONResponse{
+			Id:      requestedID,
+			Details: nil,
+			Status:  "1",
+			Errors:  []interface{}{},
+		})
+		return
+	}
+
+	// Expected columns from SP (common patterns):
+	// - "Id" or "id"
+	// - "Details" or "details"
+	respID := firstNonZeroInt(row, "Id", "id", "TransactionsId", "transactionsId")
+	if respID == 0 {
+		respID = requestedID
+	}
+
+	details := firstStringPtr(row, "Details", "details") // keep it as string JSON
+
+	if details == nil || *details == "" {
+		c.JSON(http.StatusOK, transactionJSONResponse{
+			Id:      respID,
+			Details: nil,
+			Status:  "1",
+			Errors:  []interface{}{},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, transactionJSONResponse{
+		Id:      respID,
+		Details: *details, // IMPORTANT: details is a JSON string
+		Status:  "1",
+		Errors:  []interface{}{},
+	})
+}
+
+func ListNotes(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+
+	transactionsId, ok := mustInt64FromQueryOrForm(c.Query("transactionsId"))
+	if !ok || transactionsId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "Missing or invalid transactionsId",
+		})
+		return
+	}
+
+	// ✅ Adjust SP name if your DB uses a different one
+	const spName = "v1_AdminRole_TransactionsModule_GetNotesList"
+
+	params := map[string]interface{}{
+		"SiteUsersId":    siteUsersId,
+		"TransactionsId": transactionsId,
+	}
+
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"status": "0", "error": err.Error()})
+		return
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		// no result => match your standard response
+		c.JSON(http.StatusOK, gin.H{
+			"id":      0,
+			"details": gin.H{"notes": []interface{}{}},
+			"status":  "1",
+			"errors":  []interface{}{},
+		})
+		return
+	}
+
+	// ✅ The SP returns JSON in a column; your sample shows it's the 3rd column value.
+	// We'll robustly find the FIRST string column that looks like JSON.
+	jsonStr := ""
+	for _, v := range row {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		ss := strings.TrimSpace(s)
+		if strings.HasPrefix(ss, "{") || strings.HasPrefix(ss, "[") {
+			jsonStr = ss
+			break
+		}
+	}
+
+	if jsonStr == "" {
+		// If SP returned no JSON, respond empty
+		c.JSON(http.StatusOK, gin.H{
+			"id":      0,
+			"details": gin.H{"notes": []interface{}{}},
+			"status":  "1",
+			"errors":  []interface{}{},
+		})
+		return
+	}
+
+	var env spNotesEnvelope
+	if err := json.Unmarshal([]byte(jsonStr), &env); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  "Failed to parse notes JSON: " + err.Error(),
+		})
+		return
+	}
+
+	// Convert SP notes -> API notes (camelCase keys + id as string)
+	out := make([]apiNoteItem, 0, len(env.Notes))
+	for _, n := range env.Notes {
+		out = append(out, apiNoteItem{
+			Id:        strconv.Itoa(n.Id),
+			Text:      n.Text,
+			AddDate:   n.AddDate,
+			AddedBy:   n.AddedBy,
+			BEditable: n.BEditable,
+			BPinned:   n.BPinned,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id": 0,
+		"details": gin.H{
+			"notes": out,
+		},
+		"status": "1",
+		"errors": []interface{}{},
+	})
+
+}
+
+// helper for picking first existing key from a row
+func firstNonNil(row map[string]interface{}, keys ...string) interface{} {
+	for _, k := range keys {
+		if v, ok := row[k]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func AddNote(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+
+	// form-data fields
+	transactionsIdStr := c.PostForm("transactionsId")
+	text := c.PostForm("text")
+
+	transactionsId, ok := mustInt64FromQueryOrForm(transactionsIdStr)
+	if !ok || transactionsId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "Missing or invalid transactionsId",
+		})
+		return
+	}
+	if text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "Missing text",
+		})
+		return
+	}
+
+	fullName := ""
+	userCode := ""
+
+	if v, ok := user["FullName"].(string); ok {
+		fullName = v
+	}
+	if v, ok := user["UserCode"].(string); ok {
+		userCode = v
+	}
+
+	addedBy := fullName
+	if userCode != "" {
+		addedBy = fullName + " (Admin - " + userCode + ")"
+	}
+
+	// ✅ Adjust SP name if your DB uses a different one
+	const spName = "v1_AdminRole_TransactionsModule_AddNote"
+
+	params := map[string]interface{}{
+		"SiteUsersId":    siteUsersId,
+		"TransactionsId": transactionsId,
+		"Text":           text,
+		"AddedBy":        addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		// Treat as failure (SP should return id)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  "Invalid SP response",
+		})
+		return
+	}
+
+	// SP should return the new note id; key names may differ
+	newId := asString(firstNonNil(row, "Id", "id", "NoteId", "noteId"))
+	if newId == "" {
+		newId = "0"
+	}
+
+	c.JSON(http.StatusOK, addNoteResponse{
+		Id: newId,
+		Details: addNoteDetails{
+			TransactionsId: transactionsId,
+			Text:           text,
+		},
+		Status: "1",
+		Errors: []interface{}{},
+	})
+}
+
+func EditNote(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+	// Form-data
+	noteId := strings.TrimSpace(c.PostForm("id"))
+	text := strings.TrimSpace(c.PostForm("text"))
+
+	if noteId == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "id is required",
+		})
+		return
+	}
+	if text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "text is required",
+		})
+		return
+	}
+
+	// Optional: build EditedBy if your SP requires it
+	editedBy := ""
+	if v, ok := user["firstName"]; ok {
+		editedBy = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if v, ok := user["lastName"]; ok {
+		ln := strings.TrimSpace(fmt.Sprint(v))
+		if ln != "" {
+			if editedBy != "" {
+				editedBy += " "
+			}
+			editedBy += ln
+		}
+	}
+	userCode := ""
+	if v, ok := user["userCode"]; ok {
+		userCode = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if userCode != "" {
+		if editedBy == "" {
+			editedBy = fmt.Sprintf("(Admin - %s)", userCode)
+		} else {
+			editedBy = fmt.Sprintf("%s (Admin - %s)", editedBy, userCode)
+		}
+	}
+
+	// ✅ Use the correct SP name from your DB (replace this with the exact one from .NET)
+	// Example:
+	spName := "v1_AdminRole_TransactionsModule_EditNote"
+
+	params := map[string]interface{}{
+		"SiteUsersId": siteUsersId,
+		"NotesID":     noteId,
+		"Text":        text,
+		// If SP expects AddedBy, keep this:
+		"EditedBy": editedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	// Many of your SPs return either:
+	// 1) one row with edited note fields
+	// 2) or nothing but success
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		// still return expected response
+		c.JSON(http.StatusOK, gin.H{
+			"id": 0,
+			"details": editNoteDetails{
+				Id:        noteId,
+				Text:      text,
+				BEditable: false,
+			},
+			"status": "1",
+			"errors": []interface{}{},
+		})
+		return
+	}
+
+	// bEditable might come from SP, otherwise default false
+	bEditable := false
+	if v, ok := row["bEditable"]; ok && v != nil {
+		switch t := v.(type) {
+		case bool:
+			bEditable = t
+		case int:
+			bEditable = t != 0
+		case int64:
+			bEditable = t != 0
+		case float64:
+			bEditable = t != 0
+		default:
+			s := strings.TrimSpace(fmt.Sprint(t))
+			bEditable = strings.EqualFold(s, "true") || s == "1"
+		}
+	}
+
+	// id/text might also come from SP
+	outId := noteId
+	if v, ok := row["Id"]; ok && v != nil {
+		outId = strings.TrimSpace(fmt.Sprint(v))
+	}
+	outText := text
+	if v, ok := row["Text"]; ok && v != nil {
+		outText = fmt.Sprint(v)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id": 0,
+		"details": editNoteDetails{
+			Id:        outId,
+			Text:      outText,
+			BEditable: bEditable,
+		},
+		"status": "1",
+		"errors": []interface{}{},
+	})
+}
+
+func PinNote(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+	siteUsersId := user["id"].(int)
+
+	var req pinNoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "Invalid JSON body",
+		})
+		return
+	}
+
+	req.Id = strings.TrimSpace(req.Id)
+	if req.Id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"error":  "id is required",
+		})
+		return
+	}
+
+	// Optional: build EditedBy if your SP requires it
+	editedBy := ""
+	if v, ok := user["firstName"]; ok {
+		editedBy = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if v, ok := user["lastName"]; ok {
+		ln := strings.TrimSpace(fmt.Sprint(v))
+		if ln != "" {
+			if editedBy != "" {
+				editedBy += " "
+			}
+			editedBy += ln
+		}
+	}
+	userCode := ""
+	if v, ok := user["userCode"]; ok {
+		userCode = strings.TrimSpace(fmt.Sprint(v))
+	}
+	if userCode != "" {
+		if editedBy == "" {
+			editedBy = fmt.Sprintf("(Admin - %s)", userCode)
+		} else {
+			editedBy = fmt.Sprintf("%s (Admin - %s)", editedBy, userCode)
+		}
+	}
+
+	// ✅ Replace with exact SP name from your .NET mapping if different
+	spName := "v1_AdminRole_TransactionsModule_PinNote"
+
+	params := map[string]interface{}{
+		"SiteUsersId": siteUsersId,
+		"NotesID":     req.Id,
+		"bPinned":     req.BPinned,
+		"EditedBy":    editedBy,
+	}
+
+	_, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id": 0,
+		"details": pinNoteDetails{
+			Id:      req.Id,
+			BPinned: req.BPinned,
+		},
+		"status": "1",
+		"errors": []interface{}{},
+	})
+}
+
+func ListFrozenTransactions(c *gin.Context) {
+	user := auth.ExtractUser(c)
+	if user == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+		return
+	}
+
+	siteUsersId := user["id"].(int)
+
+	// ✅ required query param in .NET: customerAssetAccountsId
+	customerAssetAccountsIdStr := c.Query("customerAssetAccountsId")
+	if customerAssetAccountsIdStr == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []gin.H{
+				{"fieldName": "customerAssetAccountsId", "messageCode": "Required"},
+			},
+		})
+		return
+	}
+
+	customerAssetAccountsId, err := strconv.Atoi(customerAssetAccountsIdStr)
+	if err != nil || customerAssetAccountsId <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"status": "0",
+			"errors": []gin.H{
+				{"fieldName": "customerAssetAccountsId", "messageCode": "Invalid"},
+			},
+		})
+		return
+	}
+
+	// .NET: QueryRecordListDto bind (filters/sort/search/pageNumber/pageSize)
+	q := admin.ParseQueryRecordList(c.Request.URL.Query())
+
+	// .NET list endpoints usually cap pagesize (same as other Go endpoints)
+	if q.PageSize > 200 {
+		q.PageSize = 200
+	}
+
+	// .NET: load existing list selections:
+	// _listSelectionsDbClient.GetSiteUsersListSelectionsAsync(siteUsersId, "DefaultTrackingID", "FrozenTransactions")
+	loadSelections := func() *admin.ListSelections {
+		sp := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+		params := map[string]interface{}{
+			"SiteUsersId": siteUsersId,
+			"TrackingId":  "DefaultTrackingID",
+			"ListKey":     "FrozenTransactions",
+		}
+
+		res, err := auth.ExecSP(db.DB, sp, params, 1)
+		if err != nil {
+			return nil
+		}
+
+		row, ok := auth.AsSingleRow(res)
+		if !ok {
+			return nil
+		}
+		return admin.SelectionsFromRow(row)
+	}
+
+	ex := loadSelections()
+	admin.OverrideWithSelections(&q, ex)
+
+	// Column map + search fields based on FrozenTransactionListDataRow attributes in .NET
+	cfg := admin.ListSPConfig{
+		ListKey:    "FrozenTransactions",
+		TrackingID: "DefaultTrackingID",
+		ColumnMap: map[string]string{
+			"assets__Name": "Assets.Name",
+			"assets__Code": "Assets.Code",
+			"customerAssetAccountsTransactions__CustomerAssetAccountsTransactionsCode": "CustomerAssetAccountsTransactions.CustomerAssetAccountsTransactionsCode",
+			"customerAssetAccountsTransactions__Date":                                  "CustomerAssetAccountsTransactions.Date",
+			"transactionTypes__Type":                                                   "TransactionTypes.Type",
+			"customerAssetAccountsTransactions__Amount":                                "CustomerAssetAccountsTransactions.Amount",
+			"feeTransactions__Amount":                                                  "FeeTransactions.Amount",
+			"trmLabsHelper__bSupportedCurrency":                                        "TRMLabsHelper.bSupportedCurrency",
+			"customerAssetAccountsTransactions__bAwaitingUnfreeze":                     "CustomerAssetAccountsTransactions.bAwaitingUnfreeze",
+		},
+		SearchFields: []string{
+			"Assets.Name",
+			"Assets.Code",
+			"CustomerAssetAccountsTransactions.CustomerAssetAccountsTransactionsCode",
+			"TRMLabsHelper.bSupportedCurrency",
+			"CustomerAssetAccountsTransactions.bAwaitingUnfreeze",
+		},
+	}
+
+	// Build SP params (pagination + filters + sort + search + tracking/listkey + user)
+	spParams := admin.BuildListSPParams(q, siteUsersId, cfg)
+
+	// add required param: @CustomerAssetAccountsId
+	spParams["CustomerAssetAccountsId"] = customerAssetAccountsId
+
+	// .NET DB SP:
+	// const string storedProcName = "v1_AdminRole_FrozenTransactionsModule_GetList";
+	spName := "v1_AdminRole_FrozenTransactionsModule_GetList"
+	res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+	respond := func(listData []map[string]interface{}, total int) {
+		columns := ColumnsFrozenTransactionsList()
+		details := admin.BuildListDetails(columns, listData, q, total)
+
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "1",
+			"id":      siteUsersId,
+			"errors":  []interface{}{},
+			"details": details,
+		})
+	}
+
+	if err != nil {
+		// same behavior as other list endpoints in this repo
+		if err.Error() == "sql: no rows in result set" {
+			respond([]map[string]interface{}{}, 0)
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  err.Error(),
+		})
+		return
+	}
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"status": "0",
+			"error":  "Invalid SP response",
+		})
+		return
+	}
+
+	if len(rows) == 0 {
+		respond([]map[string]interface{}{}, 0)
+		return
+	}
+
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		// convert "Assets__Name" -> "assets__Name" (lowercase first char)
+		item := admin.NormalizeRowKeys(row)
+		listData = append(listData, item)
+
+		// total count (same as other modules)
+		if v, ok := row["HowManyResults"]; ok && v != nil {
+			switch t := v.(type) {
+			case int:
+				total = t
+			case int64:
+				total = int(t)
+			case float64:
+				total = int(t)
+			default:
+				i, _ := strconv.Atoi(fmt.Sprint(t))
+				if i > 0 {
+					total = i
+				}
+			}
+		}
+	}
+
+	respond(listData, total)
+}
+
 func ViewAlerts(c *gin.Context) {
 	user := auth.ExtractUser(c)
 	if user == nil {

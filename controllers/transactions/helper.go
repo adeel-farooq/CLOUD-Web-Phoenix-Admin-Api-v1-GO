@@ -178,3 +178,105 @@ func asString(v interface{}) string {
 		return fmt.Sprint(t)
 	}
 }
+
+func parseInt64Prefer(primary, fallback string) int64 {
+	p := strings.TrimSpace(primary)
+	if p != "" {
+		if v, err := strconv.ParseInt(p, 10, 64); err == nil {
+			return v
+		}
+	}
+	f := strings.TrimSpace(fallback)
+	if f != "" {
+		if v, err := strconv.ParseInt(f, 10, 64); err == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+func firstNonZeroInt(row map[string]interface{}, keys ...string) int64 {
+	for _, k := range keys {
+		if v, ok := row[k]; ok && v != nil {
+			switch t := v.(type) {
+			case int:
+				if t != 0 {
+					return int64(t)
+				}
+			case int32:
+				if t != 0 {
+					return int64(t)
+				}
+			case int64:
+				if t != 0 {
+					return t
+				}
+			case float64:
+				if t != 0 {
+					return int64(t)
+				}
+			default:
+				s := fmt.Sprint(t)
+				if s == "" {
+					continue
+				}
+				if n, err := strconv.ParseInt(s, 10, 64); err == nil && n != 0 {
+					return n
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func firstStringPtr(row map[string]interface{}, keys ...string) *string {
+	for _, k := range keys {
+		if v, ok := row[k]; ok && v != nil {
+			switch t := v.(type) {
+			case string:
+				s := t
+				return &s
+			case []byte:
+				s := string(t)
+				return &s
+			default:
+				s := fmt.Sprint(t)
+				if s != "" && s != "<nil>" {
+					return &s
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func mustInt64FromQueryOrForm(val string) (int64, bool) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(val, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func asBool(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case int:
+		return t != 0
+	case int64:
+		return t != 0
+	case float64:
+		return t != 0
+	default:
+		s := strings.TrimSpace(strings.ToLower(fmt.Sprint(t)))
+		return s == "true" || s == "1" || s == "yes"
+	}
+}

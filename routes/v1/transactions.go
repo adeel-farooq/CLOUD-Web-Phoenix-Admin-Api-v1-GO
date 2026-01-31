@@ -16,6 +16,12 @@ func RegisterTransactionRoutes(router *gin.RouterGroup) {
 	router.GET("/pendingtransactionsmodule/listproducts", transactions.ListProducts)
 	router.GET("/pendingtransactionstreasurymodule/list", transactions.ListPendingTreasury)
 	router.GET("/pendingtransactionstreasurymodule/listproducts", transactions.ListPendingTreasuryProducts)
+	router.GET("/transactionsmodule/transaction-json", transactions.TransactionJSON)
+	router.GET("/transactionsmodule/list-notes", transactions.ListNotes)
+	router.POST("/transactionsmodule/addnote", transactions.AddNote)
+	router.POST("/transactionsmodule/edit-note", transactions.EditNote)
+	router.POST("/transactionsmodule/pin-note", transactions.PinNote)
+	router.GET("/frozentransactionsmodule/list", transactions.List)
 	router.GET("/transactionsmodule/view-alerts", transactions.ViewAlerts)
 
 	// We'll add next endpoints here one-by-one:
