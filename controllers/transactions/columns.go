@@ -1,1549 +1,576 @@
 package transactions
 
-import "encoding/json"
+// =============================================================================
+// REFACTORED COLUMN DEFINITIONS
+// This file replaces columns.go with a builder pattern to eliminate duplication
+// =============================================================================
 
-func deepCopyColumnMap(in map[string]interface{}) map[string]interface{} {
-	if in == nil {
-		return nil
-	}
-	// Column definitions are nested maps/slices; JSON round-trip is the simplest safe deep-copy.
-	b, err := json.Marshal(in)
-	if err != nil {
-		out := make(map[string]interface{}, len(in))
-		for k, v := range in {
-			out[k] = v
-		}
-		return out
-	}
-	var out map[string]interface{}
-	if err := json.Unmarshal(b, &out); err != nil {
-		fallback := make(map[string]interface{}, len(in))
-		for k, v := range in {
-			fallback[k] = v
-		}
-		return fallback
-	}
-	return out
+// ColumnDef represents a single column definition
+type ColumnDef struct {
+	ColumnKey      string
+	LabelKey       string
+	LabelValue     string
+	OrderNumber    int
+	BSortable      bool
+	BFilterable    bool
+	BVisible       bool
+	BLocked        bool
+	Type           string
+	FilterMetadata interface{}
+	Tooltip        interface{}
 }
 
-func ColumnsTransactionsListAll() []map[string]interface{} {
-	return []map[string]interface{}{
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Id",
-			"labelKey":    "Id",
-			"labelValue":  "Id",
-			"orderNumber": 1,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "Integer",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    nil,
+// ToMap converts ColumnDef to the map format expected by the API
+func (c ColumnDef) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"columnKey":      c.ColumnKey,
+		"labelKey":       c.LabelKey,
+		"labelValue":     c.LabelValue,
+		"orderNumber":    c.OrderNumber,
+		"bSortable":      c.BSortable,
+		"bFilterable":    c.BFilterable,
+		"bVisible":       c.BVisible,
+		"bLocked":        c.BLocked,
+		"type":           c.Type,
+		"filterMetadata": c.FilterMetadata,
+		"tooltip":        c.Tooltip,
+	}
+}
+
+// ColumnsToMaps converts a slice of ColumnDef to slice of maps
+func ColumnsToMaps(cols []ColumnDef) []map[string]interface{} {
+	result := make([]map[string]interface{}, len(cols))
+	for i, col := range cols {
+		col.OrderNumber = i + 1 // Auto-assign order numbers
+		result[i] = col.ToMap()
+	}
+	return result
+}
+
+// =============================================================================
+// FILTER METADATA HELPERS
+// =============================================================================
+
+func FilterTextContains() map[string]interface{} {
+	return map[string]interface{}{"filterType": "TextContains", "details": nil}
+}
+
+func FilterTextContainsWithDetails() map[string]interface{} {
+	return map[string]interface{}{"filterType": "TextContains", "details": map[string]interface{}{}}
+}
+
+func FilterAmount() map[string]interface{} {
+	return map[string]interface{}{"filterType": "Amount", "details": nil}
+}
+
+func FilterAmountWithDetails() map[string]interface{} {
+	return map[string]interface{}{"filterType": "Amount", "details": map[string]interface{}{}}
+}
+
+func FilterDateTimeRange() map[string]interface{} {
+	return map[string]interface{}{"filterType": "DateTime:Range", "details": map[string]interface{}{}}
+}
+
+func FilterSingleChoiceYesNo() map[string]interface{} {
+	return map[string]interface{}{
+		"filterType": "SingleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]interface{}{
+				{"value": "Yes", "label": "Yes"},
+				{"value": "No", "label": "No"},
 			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__CustomerAssetAccountsTransactionsCode",
-			"labelKey":    "CustomerAssetAccountsTransactionsCode",
-			"labelValue":  "Code",
-			"orderNumber": 2,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__Description",
-			"labelKey":       "Description",
-			"labelValue":     "Description",
-			"orderNumber":    3,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Amount",
-			"labelKey":    "Amount",
-			"labelValue":  "Amount",
-			"orderNumber": 4,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "Decimal",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Date",
-			"labelKey":    "Ticker",
-			"labelValue":  "Date",
-			"orderNumber": 5,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "DateTime",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "DateTime:Range",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__BankReference",
-			"labelKey":    "BankReference",
-			"labelValue":  "Bank ID",
-			"orderNumber": 6,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__ImadNumber",
-			"labelKey":    "ImadNumber",
-			"labelValue":  "IMAD",
-			"orderNumber": 7,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccounts__Id",
-			"labelKey":       "CustomerAssetAccountsID",
-			"labelValue":     "Customer Asset Accounts ID",
-			"orderNumber":    8,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "Customers__Id",
-			"labelKey":       "CustomersID",
-			"labelValue":     "Cus. ID",
-			"orderNumber":    9,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Customers__CustomersCode",
-			"labelKey":    "CustomersCode",
-			"labelValue":  "Cst. Code",
-			"orderNumber": 10,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerDetails__CustomerName",
-			"labelKey":    "CustomerName",
-			"labelValue":  "Cst. Name",
-			"orderNumber": 11,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Licensees__LicenseeName",
-			"labelKey":    "LicenseeName",
-			"labelValue":  "Licensee",
-			"orderNumber": 12,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "LicenseesBrands__InternalName",
-			"labelKey":    "LicenseesBrand",
-			"labelValue":  "Brand",
-			"orderNumber": 13,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Assets__Code",
-			"labelKey":    "Asset",
-			"labelValue":  "Asset",
-			"orderNumber": 14,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "Assets__MaxDecimalPrecision",
-			"labelKey":       "MaxDecimalPrecision",
-			"labelValue":     "MaxDecimalPrecision",
-			"orderNumber":    15,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "AssetClasses__Name",
-			"labelKey":    "AssetClass",
-			"labelValue":  "Asset Type",
-			"orderNumber": 16,
-			"bSortable":   false,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "MultipleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Currency", "label": "Currency"},
-						{"value": "Cryptocurrency", "label": "Cryptocurrency"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Products__DisplayName",
-			"labelKey":    "ProductName",
-			"labelValue":  "Product",
-			"orderNumber": 17,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Transaction__Rail",
-			"labelKey":    "TransactionRail",
-			"labelValue":  "Transaction Rail",
-			"orderNumber": 18,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionDirection__Direction",
-			"labelKey":    "Direction",
-			"labelValue":  "Direction",
-			"orderNumber": 19,
-			"bSortable":   false,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "MultipleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Inbound", "label": "Inbound"},
-						{"value": "Outbound", "label": "Outbound"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionStatus__Status",
-			"labelKey":    "Status",
-			"labelValue":  "Status",
-			"orderNumber": 20,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "MultipleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Complete", "label": "Complete"},
-						{"value": "Pending", "label": "Pending"},
-						{"value": "Reserved", "label": "Reserved"},
-						{"value": "Frozen", "label": "Frozen"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "Approvals__Status",
-			"labelKey":       "CustomerApprovalStatus",
-			"labelValue":     "CA Status",
-			"orderNumber":    21,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "TransactionReversed__Reversed",
-			"labelKey":    "Reversed",
-			"labelValue":  "Reversed",
-			"orderNumber": 22,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "SingleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Yes", "label": "Yes"},
-						{"value": "No", "label": "No"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__Rejected",
-			"labelKey":    "Rejected",
-			"labelValue":  "Rejected",
-			"orderNumber": 23,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "SingleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Yes", "label": "Yes"},
-						{"value": "No", "label": "No"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__bFeeWaivable",
-			"labelKey":       "bFeeWaivable",
-			"labelValue":     "Fee Waivable",
-			"orderNumber":    24,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "InformationRequestStatus__InformationRequestStatus",
-			"labelKey":    "InfoRequest",
-			"labelValue":  "RFI Status",
-			"orderNumber": 25,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__OriginatorName",
-			"labelKey":    "OriginatorName",
-			"labelValue":  "Originator Name",
-			"orderNumber": 26,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__BeneficiaryName",
-			"labelKey":    "BeneficiaryName",
-			"labelValue":  "Beneficiary Name",
-			"orderNumber": 27,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__TransmitterName",
-			"labelKey":    "TransmitterName",
-			"labelValue":  "Transmitter Name",
-			"orderNumber": 28,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__SenderJurisdiction",
-			"labelKey":    "SenderJurisdiction",
-			"labelValue":  "Sender Jurisdiction",
-			"orderNumber": 29,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__TransmitterJurisdiction",
-			"labelKey":    "TransmitterJurisdiction",
-			"labelValue":  "Transmitter Jurisdiction",
-			"orderNumber": 30,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__BeneficiaryJurisdiction",
-			"labelKey":    "BeneficiaryJurisdiction",
-			"labelValue":  "Beneficiary Jurisdiction",
-			"orderNumber": 31,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__PaymentType",
-			"labelKey":    "PaymentType",
-			"labelValue":  "Payment Type",
-			"orderNumber": 32,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "TransactionScreening__International",
-			"labelKey":    "International",
-			"labelValue":  "International",
-			"orderNumber": 33,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "SingleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "Yes", "label": "Yes"},
-						{"value": "No", "label": "No"},
-					},
-				},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "TransactionAmounts__Balance",
-			"labelKey":       "Balance",
-			"labelValue":     "Balance",
-			"orderNumber":    34,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactionScreenings__bAlertsAvailable",
-			"labelKey":       "bAlertsAvailable",
-			"labelValue":     "Alerts Available",
-			"orderNumber":    35,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "bCancellable",
-			"labelKey":    "bCancellable",
-			"labelValue":  "Cancellable",
-			"orderNumber": 36,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "Boolean",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "SingleChoice",
-				"details": map[string]interface{}{
-					"PossibleValues": []map[string]interface{}{
-						{"value": "True", "label": "True"},
-						{"value": "False", "label": "False"},
-					},
-				},
-			},
-			"tooltip": nil,
 		},
 	}
 }
 
-func ColumnsTransactionsList() []map[string]interface{} {
-	return []map[string]interface{}{
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Id",
-			"labelKey":    "Id",
-			"labelValue":  "Id",
-			"orderNumber": 1,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "Integer",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    nil,
+func FilterSingleChoiceTrueFalse() map[string]interface{} {
+	return map[string]interface{}{
+		"filterType": "SingleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]interface{}{
+				{"value": "True", "label": "True"},
+				{"value": "False", "label": "False"},
 			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Date",
-			"labelKey":    "Ticker",
-			"labelValue":  "Date",
-			"orderNumber": 2,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "DateTime",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "DateTime:Range",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__Description",
-			"labelKey":       "Description",
-			"labelValue":     "Description",
-			"orderNumber":    3,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__Amount",
-			"labelKey":       "Amount",
-			"labelValue":     "Amount",
-			"orderNumber":    4,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "TransactionAmounts__Fee",
-			"labelKey":       "Fee",
-			"labelValue":     "Fee",
-			"orderNumber":    5,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "TransactionAmounts__Balance",
-			"labelKey":       "Balance",
-			"labelValue":     "Balance",
-			"orderNumber":    6,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "TransactionAmounts__InfoRequest",
-			"labelKey":    "InfoRequest",
-			"labelValue":  "Info Request",
-			"orderNumber": 7,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactionScreenings__bAlertsAvailable",
-			"labelKey":       "bAlertsAvailable",
-			"labelValue":     "Alerts Available",
-			"orderNumber":    8,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__bInsufficientOpAccountBalance",
-			"labelKey":       "bInsufficientOpAccountBalance",
-			"labelValue":     "Insufficient Funds",
-			"orderNumber":    9,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Assets__Code",
-			"labelKey":    "Asset",
-			"labelValue":  "Asset",
-			"orderNumber": 10,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "Customers__Id",
-			"labelKey":       "CustomersID",
-			"labelValue":     "Cus. ID",
-			"orderNumber":    11,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Customers__CustomersCode",
-			"labelKey":    "CustomersCode",
-			"labelValue":  "Cst. Code",
-			"orderNumber": 12,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerUsers__FullName",
-			"labelKey":    "CustomersName",
-			"labelValue":  "Cst. Name",
-			"orderNumber": 13,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Customers__CompanyName",
-			"labelKey":    "BusinessName",
-			"labelValue":  "Business",
-			"orderNumber": 14,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "LicenseesBrands__StatementDescriptor",
-			"labelKey":    "LicenseesBrand",
-			"labelValue":  "Brand",
-			"orderNumber": 15,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "ExternalAssetWallets__WalletAddress",
-			"labelKey":       "WalletAddress",
-			"labelValue":     "Wallet Address",
-			"orderNumber":    16,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__TransactionHash",
-			"labelKey":       "TransactionHash",
-			"labelValue":     "Transaction Hash",
-			"orderNumber":    17,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "WidgetClientUsers__WidgetClientUsersCode",
-			"labelKey":    "WidgetClientUsersCode",
-			"labelValue":  "Widget Code",
-			"orderNumber": 18,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "FeeIncurringActions__DisplayName",
-			"labelKey":    "TransactionType",
-			"labelValue":  "Type",
-			"orderNumber": 19,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__ExternalId",
-			"labelKey":       "ExternalID",
-			"labelValue":     "External ID",
-			"orderNumber":    20,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "Assets__MaxDecimalPrecision",
-			"labelKey":       "MaxDecimalPrecision",
-			"labelValue":     "MaxDecimalPrecision",
-			"orderNumber":    21,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Products__ProductName",
-			"labelKey":    "ProductName",
-			"labelValue":  "Product",
-			"orderNumber": 22,
-			"bSortable":   false,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "bCancelAvailable",
-			"labelKey":       "bCancelAvailable",
-			"labelValue":     "Cancel Available",
-			"orderNumber":    23,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bMarkAsPendingAvailable",
-			"labelKey":       "bMarkAsPendingAvailable",
-			"labelValue":     "Mark As Pending Available",
-			"orderNumber":    24,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bCompleteAvailable",
-			"labelKey":       "bCompleteAvailable",
-			"labelValue":     "Complete Available",
-			"orderNumber":    25,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bAssignAvailable",
-			"labelKey":       "bAssignAvailable",
-			"labelValue":     "Assign Available",
-			"orderNumber":    26,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
 		},
 	}
 }
 
-func ColumnsPendingTransactionsList() []map[string]interface{} {
-	return []map[string]interface{}{
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Id",
-			"labelKey":    "Id",
-			"labelValue":  "Id",
-			"orderNumber": 1,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    false,
-			"bLocked":     false,
-			"type":        "Integer",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    nil,
+func FilterMultipleChoiceDirection() map[string]interface{} {
+	return map[string]interface{}{
+		"filterType": "MultipleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]interface{}{
+				{"value": "Inbound", "label": "Inbound"},
+				{"value": "Outbound", "label": "Outbound"},
 			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Date",
-			"labelKey":    "Ticker",
-			"labelValue":  "Date",
-			"orderNumber": 2,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "DateTime",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "DateTime:Range",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__Description",
-			"labelKey":       "Description",
-			"labelValue":     "Description",
-			"orderNumber":    3,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__Amount",
-			"labelKey":       "Amount",
-			"labelValue":     "Amount",
-			"orderNumber":    4,
-			"bSortable":      true,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "TransactionAmounts__Fee",
-			"labelKey":       "Fee",
-			"labelValue":     "Fee",
-			"orderNumber":    5,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "TransactionAmounts__Balance",
-			"labelKey":       "Balance",
-			"labelValue":     "Balance",
-			"orderNumber":    6,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "Decimal",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "TransactionAmounts__InfoRequest",
-			"labelKey":    "InfoRequest",
-			"labelValue":  "Info Request",
-			"orderNumber": 7,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactionScreenings__bAlertsAvailable",
-			"labelKey":       "bAlertsAvailable",
-			"labelValue":     "Alerts Available",
-			"orderNumber":    8,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__bInsufficientOpAccountBalance",
-			"labelKey":       "bInsufficientOpAccountBalance",
-			"labelValue":     "Insufficient Funds",
-			"orderNumber":    9,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Assets__Code",
-			"labelKey":    "Asset",
-			"labelValue":  "Asset",
-			"orderNumber": 10,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "Customers__Id",
-			"labelKey":       "CustomersID",
-			"labelValue":     "Cus. ID",
-			"orderNumber":    11,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Customers__CustomersCode",
-			"labelKey":    "CustomersCode",
-			"labelValue":  "Cst. Code",
-			"orderNumber": 12,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "CustomerUsers__FullName",
-			"labelKey":    "CustomersName",
-			"labelValue":  "Cst. Name",
-			"orderNumber": 13,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "Customers__CompanyName",
-			"labelKey":    "BusinessName",
-			"labelValue":  "Business",
-			"orderNumber": 14,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "LicenseesBrands__StatementDescriptor",
-			"labelKey":    "LicenseesBrand",
-			"labelValue":  "Brand",
-			"orderNumber": 15,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "ExternalAssetWallets__WalletAddress",
-			"labelKey":       "WalletAddress",
-			"labelValue":     "Wallet Address",
-			"orderNumber":    16,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__TransactionHash",
-			"labelKey":       "TransactionHash",
-			"labelValue":     "Transaction Hash",
-			"orderNumber":    17,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       true,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "WidgetClientUsers__WidgetClientUsersCode",
-			"labelKey":    "WidgetClientUsersCode",
-			"labelValue":  "Widget Code",
-			"orderNumber": 18,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":   "FeeIncurringActions__DisplayName",
-			"labelKey":    "TransactionType",
-			"labelValue":  "Type",
-			"orderNumber": 19,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "CustomerAssetAccountsTransactions__ExternalId",
-			"labelKey":       "ExternalID",
-			"labelValue":     "External ID",
-			"orderNumber":    20,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "String",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "Assets__MaxDecimalPrecision",
-			"labelKey":       "MaxDecimalPrecision",
-			"labelValue":     "MaxDecimalPrecision",
-			"orderNumber":    21,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Integer",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":   "Products__ProductName",
-			"labelKey":    "ProductName",
-			"labelValue":  "Product",
-			"orderNumber": 22,
-			"bSortable":   false,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
-		},
-		{
-			"columnKey":      "bCancelAvailable",
-			"labelKey":       "bCancelAvailable",
-			"labelValue":     "Cancel Available",
-			"orderNumber":    23,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bMarkAsPendingAvailable",
-			"labelKey":       "bMarkAsPendingAvailable",
-			"labelValue":     "Mark As Pending Available",
-			"orderNumber":    24,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bCompleteAvailable",
-			"labelKey":       "bCompleteAvailable",
-			"labelValue":     "Complete Available",
-			"orderNumber":    25,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
-		},
-		{
-			"columnKey":      "bAssignAvailable",
-			"labelKey":       "bAssignAvailable",
-			"labelValue":     "Assign Available",
-			"orderNumber":    26,
-			"bSortable":      false,
-			"bFilterable":    false,
-			"bVisible":       false,
-			"bLocked":        false,
-			"type":           "Boolean",
-			"filterMetadata": nil,
-			"tooltip":        nil,
 		},
 	}
 }
 
-func ColumnsPendingTransactionsTreasuryList() []map[string]interface{} {
-	base := ColumnsPendingTransactionsList()
-	refCol := map[string]interface{}{
-		"columnKey":      "CustomerAssetAccountsTransactions__Refference",
-		"labelKey":       "Refference",
-		"labelValue":     "Refference",
-		"bSortable":      true,
-		"bFilterable":    false,
-		"bVisible":       true,
-		"bLocked":        false,
-		"type":           "String",
-		"filterMetadata": nil,
-		"tooltip":        nil,
+func FilterMultipleChoiceAssetClass() map[string]interface{} {
+	return map[string]interface{}{
+		"filterType": "MultipleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]interface{}{
+				{"value": "Currency", "label": "Currency"},
+				{"value": "Cryptocurrency", "label": "Cryptocurrency"},
+			},
+		},
 	}
-
-	out := make([]map[string]interface{}, 0, len(base)+1)
-	inserted := false
-	order := 1
-
-	for _, col := range base {
-		// Insert before Description to preserve the original first columns (Id, Date) ordering.
-		if !inserted {
-			if k, ok := col["columnKey"].(string); ok && k == "CustomerAssetAccountsTransactions__Description" {
-				c := deepCopyColumnMap(refCol)
-				c["orderNumber"] = order
-				out = append(out, c)
-				order++
-				inserted = true
-			}
-		}
-
-		c := deepCopyColumnMap(col)
-		c["orderNumber"] = order
-		out = append(out, c)
-		order++
-	}
-
-	// If the base list ever changes and Description isn't present, fall back to appending.
-	if !inserted {
-		c := deepCopyColumnMap(refCol)
-		c["orderNumber"] = order
-		out = append(out, c)
-	}
-
-	return out
 }
 
-func ColumnsFrozenTransactionsList() []map[string]interface{} {
-	return []map[string]interface{}{
-		{
-			"columnKey":   "Assets__Name",
-			"labelKey":    "name",
-			"labelValue":  "Name",
-			"orderNumber": 1,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
+func FilterMultipleChoiceStatus() map[string]interface{} {
+	return map[string]interface{}{
+		"filterType": "MultipleChoice",
+		"details": map[string]interface{}{
+			"PossibleValues": []map[string]interface{}{
+				{"value": "Complete", "label": "Complete"},
+				{"value": "Pending", "label": "Pending"},
+				{"value": "Reserved", "label": "Reserved"},
+				{"value": "Frozen", "label": "Frozen"},
 			},
-			"tooltip": nil,
+		},
+	}
+}
+
+// =============================================================================
+// SHARED COLUMN DEFINITIONS (reusable across list types)
+// =============================================================================
+
+var (
+	ColTransactionId = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Id", LabelKey: "Id", LabelValue: "Id",
+		BSortable: true, BFilterable: true, BVisible: false, Type: "Integer",
+		FilterMetadata: FilterAmount(),
+	}
+
+	ColTransactionDate = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Date", LabelKey: "Ticker", LabelValue: "Date",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "DateTime",
+		FilterMetadata: FilterDateTimeRange(),
+	}
+
+	ColDescription = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Description", LabelKey: "Description", LabelValue: "Description",
+		BSortable: true, BFilterable: false, BVisible: true, Type: "String",
+	}
+
+	ColAmount = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Amount", LabelKey: "Amount", LabelValue: "Amount",
+		BSortable: true, BFilterable: false, BVisible: true, Type: "Decimal",
+	}
+
+	ColAmountFilterable = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Amount", LabelKey: "Amount", LabelValue: "Amount",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "Decimal",
+		FilterMetadata: FilterAmountWithDetails(),
+	}
+
+	ColFee = ColumnDef{
+		ColumnKey: "TransactionAmounts__Fee", LabelKey: "Fee", LabelValue: "Fee",
+		BSortable: false, BFilterable: false, BVisible: true, Type: "Decimal",
+	}
+
+	ColBalance = ColumnDef{
+		ColumnKey: "TransactionAmounts__Balance", LabelKey: "Balance", LabelValue: "Balance",
+		BSortable: false, BFilterable: false, BVisible: true, Type: "Decimal",
+	}
+
+	ColInfoRequest = ColumnDef{
+		ColumnKey: "TransactionAmounts__InfoRequest", LabelKey: "InfoRequest", LabelValue: "Info Request",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColAlertsAvailable = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactionScreenings__bAlertsAvailable", LabelKey: "bAlertsAvailable", LabelValue: "Alerts Available",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColInsufficientFunds = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__bInsufficientOpAccountBalance", LabelKey: "bInsufficientOpAccountBalance", LabelValue: "Insufficient Funds",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColAssetCode = ColumnDef{
+		ColumnKey: "Assets__Code", LabelKey: "Asset", LabelValue: "Asset",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColCustomersId = ColumnDef{
+		ColumnKey: "Customers__Id", LabelKey: "CustomersID", LabelValue: "Cus. ID",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Integer",
+	}
+
+	ColCustomersCode = ColumnDef{
+		ColumnKey: "Customers__CustomersCode", LabelKey: "CustomersCode", LabelValue: "Cst. Code",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColCustomerName = ColumnDef{
+		ColumnKey: "CustomerUsers__FullName", LabelKey: "CustomersName", LabelValue: "Cst. Name",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColCompanyName = ColumnDef{
+		ColumnKey: "Customers__CompanyName", LabelKey: "BusinessName", LabelValue: "Business",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColBrand = ColumnDef{
+		ColumnKey: "LicenseesBrands__StatementDescriptor", LabelKey: "LicenseesBrand", LabelValue: "Brand",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColWalletAddress = ColumnDef{
+		ColumnKey: "ExternalAssetWallets__WalletAddress", LabelKey: "WalletAddress", LabelValue: "Wallet Address",
+		BSortable: false, BFilterable: false, BVisible: true, Type: "String",
+	}
+
+	ColTransactionHash = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__TransactionHash", LabelKey: "TransactionHash", LabelValue: "Transaction Hash",
+		BSortable: false, BFilterable: false, BVisible: true, Type: "String",
+	}
+
+	ColWidgetCode = ColumnDef{
+		ColumnKey: "WidgetClientUsers__WidgetClientUsersCode", LabelKey: "WidgetClientUsersCode", LabelValue: "Widget Code",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColTransactionType = ColumnDef{
+		ColumnKey: "FeeIncurringActions__DisplayName", LabelKey: "TransactionType", LabelValue: "Type",
+		BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColExternalId = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__ExternalId", LabelKey: "ExternalID", LabelValue: "External ID",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "String",
+	}
+
+	ColMaxDecimalPrecision = ColumnDef{
+		ColumnKey: "Assets__MaxDecimalPrecision", LabelKey: "MaxDecimalPrecision", LabelValue: "MaxDecimalPrecision",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Integer",
+	}
+
+	ColProductName = ColumnDef{
+		ColumnKey: "Products__ProductName", LabelKey: "ProductName", LabelValue: "Product",
+		BSortable: false, BFilterable: true, BVisible: true, Type: "String",
+		FilterMetadata: FilterTextContains(),
+	}
+
+	ColCancelAvailable = ColumnDef{
+		ColumnKey: "bCancelAvailable", LabelKey: "bCancelAvailable", LabelValue: "Cancel Available",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColMarkAsPendingAvailable = ColumnDef{
+		ColumnKey: "bMarkAsPendingAvailable", LabelKey: "bMarkAsPendingAvailable", LabelValue: "Mark As Pending Available",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColCompleteAvailable = ColumnDef{
+		ColumnKey: "bCompleteAvailable", LabelKey: "bCompleteAvailable", LabelValue: "Complete Available",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColAssignAvailable = ColumnDef{
+		ColumnKey: "bAssignAvailable", LabelKey: "bAssignAvailable", LabelValue: "Assign Available",
+		BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+	}
+
+	ColReference = ColumnDef{
+		ColumnKey: "CustomerAssetAccountsTransactions__Refference", LabelKey: "Refference", LabelValue: "Refference",
+		BSortable: true, BFilterable: false, BVisible: true, Type: "String",
+	}
+)
+
+// =============================================================================
+// LIST-SPECIFIC COLUMN BUILDERS
+// =============================================================================
+
+// ColumnsTransactionsListRefactored returns columns for the basic transactions list
+func ColumnsTransactionsListRefactored() []map[string]interface{} {
+	cols := []ColumnDef{
+		ColTransactionId,
+		ColTransactionDate,
+		ColDescription,
+		ColAmount,
+		ColFee,
+		ColBalance,
+		ColInfoRequest,
+		ColAlertsAvailable,
+		ColInsufficientFunds,
+		ColAssetCode,
+		ColCustomersId,
+		ColCustomersCode,
+		ColCustomerName,
+		ColCompanyName,
+		ColBrand,
+		ColWalletAddress,
+		ColTransactionHash,
+		ColWidgetCode,
+		ColTransactionType,
+		ColExternalId,
+		ColMaxDecimalPrecision,
+		ColProductName,
+		ColCancelAvailable,
+		ColMarkAsPendingAvailable,
+		ColCompleteAvailable,
+		ColAssignAvailable,
+	}
+	return ColumnsToMaps(cols)
+}
+
+// ColumnsPendingTransactionsListRefactored returns columns for pending transactions
+// (identical to ColumnsTransactionsList)
+func ColumnsPendingTransactionsListRefactored() []map[string]interface{} {
+	return ColumnsTransactionsListRefactored()
+}
+
+// ColumnsPendingTransactionsTreasuryListRefactored returns columns for treasury pending transactions
+// (same as pending but with Reference column inserted before Description)
+func ColumnsPendingTransactionsTreasuryListRefactored() []map[string]interface{} {
+	cols := []ColumnDef{
+		ColTransactionId,
+		ColTransactionDate,
+		ColReference, // Extra column for treasury
+		ColDescription,
+		ColAmount,
+		ColFee,
+		ColBalance,
+		ColInfoRequest,
+		ColAlertsAvailable,
+		ColInsufficientFunds,
+		ColAssetCode,
+		ColCustomersId,
+		ColCustomersCode,
+		ColCustomerName,
+		ColCompanyName,
+		ColBrand,
+		ColWalletAddress,
+		ColTransactionHash,
+		ColWidgetCode,
+		ColTransactionType,
+		ColExternalId,
+		ColMaxDecimalPrecision,
+		ColProductName,
+		ColCancelAvailable,
+		ColMarkAsPendingAvailable,
+		ColCompleteAvailable,
+		ColAssignAvailable,
+	}
+	return ColumnsToMaps(cols)
+}
+
+// ColumnsTransactionsListAllRefactored returns columns for the "all transactions" list
+func ColumnsTransactionsListAllRefactored() []map[string]interface{} {
+	// This list has different columns and more filter options
+	cols := []ColumnDef{
+		ColTransactionId,
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__CustomerAssetAccountsTransactionsCode", LabelKey: "CustomerAssetAccountsTransactionsCode", LabelValue: "Code",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
+		},
+		ColDescription,
+		ColAmountFilterable,
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__Date", LabelKey: "Ticker", LabelValue: "Date",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "DateTime",
+			FilterMetadata: FilterDateTimeRange(),
 		},
 		{
-			"columnKey":   "Assets__Code",
-			"labelKey":    "ticker",
-			"labelValue":  "Ticker",
-			"orderNumber": 2,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
+			ColumnKey: "CustomerAssetAccountsTransactions__BankReference", LabelKey: "BankReference", LabelValue: "Bank ID",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
 		},
 		{
-			"columnKey":   "CustomerAssetAccountsTransactions__CustomerAssetAccountsTransactionsCode",
-			"labelKey":    "reference",
-			"labelValue":  "Reference",
-			"orderNumber": 3,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
+			ColumnKey: "CustomerAssetAccountsTransactions__ImadNumber", LabelKey: "ImadNumber", LabelValue: "IMAD",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
 		},
 		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Date",
-			"labelKey":    "date",
-			"labelValue":  "Date",
-			"orderNumber": 4,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "DateTime",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "DateTime:Range",
-				"details":    map[string]interface{}{},
-			},
-			"tooltip": nil,
+			ColumnKey: "CustomerAssetAccounts__Id", LabelKey: "CustomerAssetAccountsID", LabelValue: "Customer Asset Accounts ID",
+			BSortable: true, BFilterable: false, BVisible: false, Type: "Integer",
+		},
+		ColCustomersId,
+		{
+			ColumnKey: "Customers__CustomersCode", LabelKey: "CustomersCode", LabelValue: "Cst. Code",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
 		},
 		{
-			"columnKey":   "TransactionTypes__Type",
-			"labelKey":    "ordertype",
-			"labelValue":  "Order Type",
-			"orderNumber": 5,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "String",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "TextContains",
-				"details":    nil,
-			},
-			"tooltip": nil,
+			ColumnKey: "CustomerDetails__CustomerName", LabelKey: "CustomerName", LabelValue: "Cst. Name",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
 		},
 		{
-			"columnKey":   "CustomerAssetAccountsTransactions__Amount",
-			"labelKey":    "amount",
-			"labelValue":  "Amount",
-			"orderNumber": 6,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "Decimal",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    nil,
-			},
-			"tooltip": nil,
+			ColumnKey: "Licensees__LicenseeName", LabelKey: "LicenseeName", LabelValue: "Licensee",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
 		},
 		{
-			"columnKey":   "FeeTransactions__Amount",
-			"labelKey":    "fee",
-			"labelValue":  "Fee",
-			"orderNumber": 7,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "Decimal",
-			"filterMetadata": map[string]interface{}{
-				"filterType": "Amount",
-				"details":    nil,
-			},
-			"tooltip": nil,
+			ColumnKey: "LicenseesBrands__InternalName", LabelKey: "LicenseesBrand", LabelValue: "Brand",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
 		},
 		{
-			"columnKey":   "TRMLabsHelper__bSupportedCurrency",
-			"labelKey":    "SupportedCurrency",
-			"labelValue":  "Supported Currency",
-			"orderNumber": 8,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "Boolean",
-			"filterMetadata": map[string]interface{}{
+			ColumnKey: "Assets__Code", LabelKey: "Asset", LabelValue: "Asset",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		ColMaxDecimalPrecision,
+		{
+			ColumnKey: "AssetClasses__Name", LabelKey: "AssetClass", LabelValue: "Asset Type",
+			BSortable: false, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterMultipleChoiceAssetClass(),
+		},
+		{
+			ColumnKey: "Products__DisplayName", LabelKey: "ProductName", LabelValue: "Product",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "Transaction__Rail", LabelKey: "TransactionRail", LabelValue: "Transaction Rail",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionDirection__Direction", LabelKey: "Direction", LabelValue: "Direction",
+			BSortable: false, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterMultipleChoiceDirection(),
+		},
+		{
+			ColumnKey: "TransactionStatus__Status", LabelKey: "Status", LabelValue: "Status",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterMultipleChoiceStatus(),
+		},
+		{
+			ColumnKey: "Approvals__Status", LabelKey: "CustomerApprovalStatus", LabelValue: "CA Status",
+			BSortable: false, BFilterable: false, BVisible: true, Type: "String",
+		},
+		{
+			ColumnKey: "TransactionReversed__Reversed", LabelKey: "Reversed", LabelValue: "Reversed",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterSingleChoiceYesNo(),
+		},
+		{
+			ColumnKey: "TransactionScreening__Rejected", LabelKey: "Rejected", LabelValue: "Rejected",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterSingleChoiceYesNo(),
+		},
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__bFeeWaivable", LabelKey: "bFeeWaivable", LabelValue: "Fee Waivable",
+			BSortable: false, BFilterable: false, BVisible: false, Type: "Boolean",
+		},
+		{
+			ColumnKey: "InformationRequestStatus__InformationRequestStatus", LabelKey: "InfoRequest", LabelValue: "RFI Status",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__OriginatorName", LabelKey: "OriginatorName", LabelValue: "Originator Name",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__BeneficiaryName", LabelKey: "BeneficiaryName", LabelValue: "Beneficiary Name",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__TransmitterName", LabelKey: "TransmitterName", LabelValue: "Transmitter Name",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__SenderJurisdiction", LabelKey: "SenderJurisdiction", LabelValue: "Sender Jurisdiction",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__TransmitterJurisdiction", LabelKey: "TransmitterJurisdiction", LabelValue: "Transmitter Jurisdiction",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__BeneficiaryJurisdiction", LabelKey: "BeneficiaryJurisdiction", LabelValue: "Beneficiary Jurisdiction",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__PaymentType", LabelKey: "PaymentType", LabelValue: "Payment Type",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterTextContainsWithDetails(),
+		},
+		{
+			ColumnKey: "TransactionScreening__International", LabelKey: "International", LabelValue: "International",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "String",
+			FilterMetadata: FilterSingleChoiceYesNo(),
+		},
+		{
+			ColumnKey: "TransactionAmounts__Balance", LabelKey: "Balance", LabelValue: "Balance",
+			BSortable: false, BFilterable: false, BVisible: true, Type: "Decimal",
+		},
+		ColAlertsAvailable,
+		{
+			ColumnKey: "bCancellable", LabelKey: "bCancellable", LabelValue: "Cancellable",
+			BSortable: true, BFilterable: true, BVisible: false, Type: "Boolean",
+			FilterMetadata: FilterSingleChoiceTrueFalse(),
+		},
+	}
+	return ColumnsToMaps(cols)
+}
+
+// ColumnsFrozenTransactionsListRefactored returns columns for frozen transactions
+func ColumnsFrozenTransactionsListRefactored() []map[string]interface{} {
+	cols := []ColumnDef{
+		{
+			ColumnKey: "Assets__Name", LabelKey: "name", LabelValue: "Name",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
+		},
+		{
+			ColumnKey: "Assets__Code", LabelKey: "ticker", LabelValue: "Ticker",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
+		},
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__CustomerAssetAccountsTransactionsCode", LabelKey: "reference", LabelValue: "Reference",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
+		},
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__Date", LabelKey: "date", LabelValue: "Date",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "DateTime",
+			FilterMetadata: FilterDateTimeRange(),
+		},
+		{
+			ColumnKey: "TransactionTypes__Type", LabelKey: "ordertype", LabelValue: "Order Type",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "String",
+			FilterMetadata: FilterTextContains(),
+		},
+		{
+			ColumnKey: "CustomerAssetAccountsTransactions__Amount", LabelKey: "amount", LabelValue: "Amount",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "Decimal",
+			FilterMetadata: FilterAmount(),
+		},
+		{
+			ColumnKey: "FeeTransactions__Amount", LabelKey: "fee", LabelValue: "Fee",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "Decimal",
+			FilterMetadata: FilterAmount(),
+		},
+		{
+			ColumnKey: "TRMLabsHelper__bSupportedCurrency", LabelKey: "SupportedCurrency", LabelValue: "Supported Currency",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "Boolean",
+			FilterMetadata: map[string]interface{}{
 				"filterType": "SingleChoice",
 				"details": map[string]interface{}{
 					"PossibleValues": []map[string]string{
@@ -1552,19 +579,11 @@ func ColumnsFrozenTransactionsList() []map[string]interface{} {
 					},
 				},
 			},
-			"tooltip": nil,
 		},
 		{
-			"columnKey":   "CustomerAssetAccountsTransactions__bAwaitingUnfreeze",
-			"labelKey":    "Awaiting Unfreeze",
-			"labelValue":  "Awaiting Unfreeze",
-			"orderNumber": 9,
-			"bSortable":   true,
-			"bFilterable": true,
-			"bVisible":    true,
-			"bLocked":     false,
-			"type":        "Boolean",
-			"filterMetadata": map[string]interface{}{
+			ColumnKey: "CustomerAssetAccountsTransactions__bAwaitingUnfreeze", LabelKey: "Awaiting Unfreeze", LabelValue: "Awaiting Unfreeze",
+			BSortable: true, BFilterable: true, BVisible: true, Type: "Boolean",
+			FilterMetadata: map[string]interface{}{
 				"filterType": "SingleChoice",
 				"details": map[string]interface{}{
 					"PossibleValues": []map[string]string{
@@ -1573,7 +592,7 @@ func ColumnsFrozenTransactionsList() []map[string]interface{} {
 					},
 				},
 			},
-			"tooltip": nil,
 		},
 	}
+	return ColumnsToMaps(cols)
 }

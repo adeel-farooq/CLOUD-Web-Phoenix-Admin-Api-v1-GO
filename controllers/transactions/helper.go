@@ -7,6 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"cloud-web-phoenix-customer-v1-go/controllers/admin"
+
+	"github.com/gin-gonic/gin"
 )
 
 func round2dp(f float64) float64 {
@@ -279,4 +283,127 @@ func asBool(v interface{}) bool {
 		s := strings.TrimSpace(strings.ToLower(fmt.Sprint(t)))
 		return s == "true" || s == "1" || s == "yes"
 	}
+}
+
+func addedByFromToken(user map[string]interface{}) string {
+	fn := fmt.Sprint(user["FirstName"])
+	ln := fmt.Sprint(user["LastName"])
+	role := fmt.Sprint(user["AccountType"])
+	code := fmt.Sprint(user["UserCode"])
+
+	full := strings.TrimSpace(fn + " " + ln)
+	// same format used in admin module:
+	// "Younas Shafi (Admin - ADM1090)"
+	return fmt.Sprintf("%s (%s - %s)", full, role, code)
+}
+
+func requiredField(field string) gin.H {
+	return gin.H{
+		"status": "0",
+		"errors": []FieldError{
+			{FieldName: field, MessageCode: "Required"},
+		},
+	}
+}
+
+// =============================================================================
+// GENERIC LIST UTILITIES (Extracted from repeated code in index.go)
+// =============================================================================
+
+// ExtractTotal extracts the HowManyResults value from a row
+// This was repeated 8+ times in index.go
+func ExtractTotal(row map[string]interface{}) int {
+	v, ok := row["HowManyResults"]
+	if !ok || v == nil {
+		return 0
+	}
+
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case int32:
+		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	default:
+		if i, err := strconv.Atoi(fmt.Sprint(t)); err == nil {
+			return i
+		}
+		return 0
+	}
+}
+
+// ProcessListRows normalizes row keys, formats money fields, and extracts total count
+// This pattern was repeated in every list handler
+func ProcessListRows(rows []map[string]interface{}) ([]map[string]interface{}, int) {
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := normalizeRowKeysLocal(row)
+		FormatMoneyFields2dp(item)
+		listData = append(listData, item)
+
+		// Extract total count from first row that has it
+		if total == 0 {
+			total = ExtractTotal(row)
+		}
+	}
+
+	return listData, total
+}
+
+// normalizeRowKeysLocal converts PascalCase keys to camelCase (local version)
+// Note: You may want to use admin.NormalizeRowKeys instead if available
+func normalizeRowKeysLocal(row map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(row))
+	for k, v := range row {
+		// Skip internal fields
+		if k == "HowManyResults" || k == "RowNum" {
+			continue
+		}
+		out[lowerCamelKey(k)] = v
+	}
+	return out
+}
+
+// ProcessListRowsAdmin normalizes using admin.NormalizeRowKeys (preferred for list endpoints)
+func ProcessListRowsAdmin(rows []map[string]interface{}) ([]map[string]interface{}, int) {
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := admin.NormalizeRowKeys(row)
+		FormatMoneyFields2dp(item)
+		listData = append(listData, item)
+
+		// Extract total count from first row that has it
+		if total == 0 {
+			total = ExtractTotal(row)
+		}
+	}
+
+	return listData, total
+}
+
+// ProcessListRowsAdminNoMoney normalizes row keys but skips money formatting
+func ProcessListRowsAdminNoMoney(rows []map[string]interface{}) ([]map[string]interface{}, int) {
+	listData := make([]map[string]interface{}, 0, len(rows))
+	total := 0
+
+	for _, row := range rows {
+		item := admin.NormalizeRowKeys(row)
+		listData = append(listData, item)
+
+		// Extract total count from first row that has it
+		if total == 0 {
+			total = ExtractTotal(row)
+		}
+	}
+
+	return listData, total
 }

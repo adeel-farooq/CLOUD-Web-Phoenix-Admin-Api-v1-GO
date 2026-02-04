@@ -242,13 +242,15 @@ var ViewAlertsMetadata = []FormMetadataDto{
 }
 
 type pendingProductsResponse struct {
-	Id      interface{}          `json:"id"`
-	Details []pendingProductsOut `json:"details"`
-	Status  interface{}          `json:"status"`
-	Errors  []interface{}        `json:"errors"`
+	Id      interface{}      `json:"id"`
+	Details []PendingProduct `json:"details"`
+	Status  interface{}      `json:"status"`
+	Errors  []interface{}    `json:"errors"`
 }
 
-type pendingProductsRaw struct {
+// PendingProduct represents a pending product item
+// (Consolidated from duplicate pendingProductsRaw and pendingProductsOut types)
+type PendingProduct struct {
 	ProductId               int     `json:"productId"`
 	ProductName             string  `json:"productName"`
 	Asset                   string  `json:"asset"`
@@ -257,14 +259,9 @@ type pendingProductsRaw struct {
 	PendingTransactionCount int     `json:"pendingTransactionCount"`
 }
 
-type pendingProductsOut struct {
-	ProductId               int     `json:"productId"`
-	ProductName             string  `json:"productName"`
-	Asset                   string  `json:"asset"`
-	DisplayName             string  `json:"displayName"`
-	Amount                  float64 `json:"amount"`
-	PendingTransactionCount int     `json:"pendingTransactionCount"`
-}
+// Type aliases for backward compatibility
+type pendingProductsRaw = PendingProduct
+type pendingProductsOut = PendingProduct
 
 type spNotesEnvelope struct {
 	Notes []spNoteItem `json:"Notes"`
@@ -337,4 +334,214 @@ type pinNoteRequest struct {
 type pinNoteDetails struct {
 	Id      string `json:"id"`
 	BPinned bool   `json:"bPinned"`
+}
+
+type ReleaseRequest struct {
+	CustomerAssetAccountsTransactionsId int64  `json:"customerAssetAccountsTransactionsId"`
+	TransactionDetailsJson              string `json:"transactionDetailsJson,omitempty"`
+}
+
+type ReleaseDetails struct {
+	CustomerAssetAccountsTransactionsId int64 `json:"customerAssetAccountsTransactionsId"`
+}
+
+// .NET-style validation error (fieldName + messageCode)
+type FieldError struct {
+	FieldName   string `json:"fieldName"`
+	MessageCode string `json:"messageCode"`
+}
+
+// =====================================================
+// TransactionsModule - Cancellation DTOs
+// =====================================================
+
+// GetCancellationEligibilityRequest - GET /transactionsmodule/cancel
+type GetCancellationEligibilityRequest struct {
+	CustomerAssetAccountsTransactionsId int `form:"customerAssetAccountsTransactionsId" json:"customerAssetAccountsTransactionsId"`
+}
+
+// CancellationEligibilityResponse - response for GET /transactionsmodule/cancel
+type CancellationEligibilityResponse struct {
+	BCanBeCancelled bool   `json:"bCanBeCancelled"`
+	Message         string `json:"message,omitempty"`
+}
+
+// CancelTransactionRequest - POST /transactionsmodule/cancel
+type CancelTransactionRequest struct {
+	CustomerAssetAccountsTransactionsId int `json:"customerAssetAccountsTransactionsId"`
+}
+
+// CancelTransactionResponse - response for POST /transactionsmodule/cancel
+type CancelTransactionResponse struct {
+	CustomerTransactionCancellationRequestsId int `json:"customerTransactionCancellationRequestsId"`
+	CustomerAssetAccountsTransactionsId       int `json:"customerAssetAccountsTransactionsId"`
+}
+
+// =====================================================
+// TransactionsModule - WaiveFee DTOs
+// =====================================================
+
+// WaiveFeeRequest - POST /transactionsmodule/waive-fee
+type WaiveFeeRequest struct {
+	CustomerAssetAccountsTransactionsId int      `json:"customerAssetAccountsTransactionsId"`
+	Amount                              float64  `json:"amount"`
+	AssetSymbol                         string   `json:"assetSymbol,omitempty"`
+	PercentageAmount                    *float64 `json:"percentageAmount,omitempty"`
+	FixedAmount                         *float64 `json:"fixedAmount,omitempty"`
+	BFullRefund                         bool     `json:"bFullRefund"`
+}
+
+// WaiveFeeResponse - response for waive-fee endpoints
+type WaiveFeeResponse struct {
+	CustomerAssetAccountsTransactionsId int     `json:"customerAssetAccountsTransactionsId"`
+	Amount                              float64 `json:"amount"`
+	AssetSymbol                         string  `json:"assetSymbol,omitempty"`
+	AmountWaived                        float64 `json:"amountWaived,omitempty"`
+}
+
+// =====================================================
+// TransactionsModule - Document DTOs
+// =====================================================
+
+// DocumentListItem represents a document in the list
+type DocumentListItem struct {
+	Id          int    `json:"id"`
+	Text        string `json:"text"`
+	FileName    string `json:"fileName"`
+	AddDate     string `json:"addDate"`
+	AddedBy     string `json:"addedBy"`
+	BPinned     bool   `json:"bPinned"`
+	BEditable   bool   `json:"bEditable"`
+	ContentType string `json:"contentType,omitempty"`
+}
+
+// DocumentListResponse - response for GET /transactionsmodule/list-documents
+type DocumentListResponse struct {
+	Documents []DocumentListItem `json:"documents"`
+}
+
+// EditDocumentRequest - POST /transactionsmodule/edit-document
+type EditDocumentRequest struct {
+	Id   int    `json:"id" form:"id"`
+	Text string `json:"text" form:"text"`
+}
+
+// PinDocumentRequest - POST /transactionsmodule/pin-document
+type PinDocumentRequest struct {
+	Id      int  `json:"id"`
+	BPinned bool `json:"bPinned"`
+}
+
+// GetEditNoteResponse - response for GET /transactionsmodule/edit-note
+type GetEditNoteResponse struct {
+	Id        string `json:"id"`
+	Text      string `json:"text"`
+	BEditable bool   `json:"bEditable"`
+}
+
+// =====================================================
+// PendingTransactionsModule - DTOs
+// =====================================================
+
+// AssignFormResponse - response for GET /pendingtransactionsmodule/assign
+type AssignFormResponse struct {
+	CustomerAssetAccountsTransactionsId int64          `json:"customerAssetAccountsTransactionsId"`
+	AssignedUsers                       []int          `json:"assignedUsers"`
+	ListAdminUsers                      []DropDownItem `json:"listAdminUsers"`
+}
+
+// DropDownItem - generic dropdown item
+type DropDownItem struct {
+	Value int    `json:"value"`
+	Label string `json:"label"`
+}
+
+// AssignFormRequest - POST /pendingtransactionsmodule/assign
+type AssignFormRequest struct {
+	CustomerAssetAccountsTransactionsId int64 `json:"customerAssetAccountsTransactionsId"`
+	AssignedUsers                       []int `json:"assignedUsers"`
+}
+
+// CompleteRequest - POST /pendingtransactionsmodule/complete
+type CompleteRequest struct {
+	CustomerAssetAccountsTransactionsId int64  `json:"customerAssetAccountsTransactionsId"`
+	TransactionDetailsJson              string `json:"transactionDetailsJson,omitempty"`
+}
+
+// CompleteResponse - response for POST /pendingtransactionsmodule/complete
+type CompleteResponse struct {
+	CustomerAssetAccountsTransactionsId int64 `json:"customerAssetAccountsTransactionsId"`
+}
+
+// PendingCancelRequest - POST /pendingtransactionsmodule/cancel
+type PendingCancelRequest struct {
+	CustomerAssetAccountsTransactionsId int64  `json:"customerAssetAccountsTransactionsId"`
+	TransactionDetailsJson              string `json:"transactionDetailsJson,omitempty"`
+	BRefundFee                          bool   `json:"bRefundFee"`
+	BCancelled                          bool   `json:"bCancelled"`
+}
+
+// PendingCancelResponse - response for POST /pendingtransactionsmodule/cancel
+type PendingCancelResponse struct {
+	CustomerTransactionCancellationRequestsId int   `json:"customerTransactionCancellationRequestsId"`
+	CustomerAssetAccountsTransactionsId       int64 `json:"customerAssetAccountsTransactionsId"`
+}
+
+// MarkAsPendingRequest - POST /pendingtransactionsmodule/markaspending
+type MarkAsPendingRequest struct {
+	CustomerAssetAccountsTransactionsId int64  `json:"customerAssetAccountsTransactionsId"`
+	ExternalID                          string `json:"externalID,omitempty"`
+	TransactionDetailsJson              string `json:"transactionDetailsJson,omitempty"`
+}
+
+// =====================================================
+// FrozenTransactionsModule - DTOs
+// =====================================================
+
+// FrozenTransactionView - response for GET /frozentransactionsmodule/view
+type FrozenTransactionView struct {
+	TRMLabsHelperId          int     `json:"trmLabsHelperId"`
+	Risk                     float64 `json:"risk,omitempty"`
+	RiskLabel                string  `json:"riskLabel,omitempty"`
+	ScreenStatus             string  `json:"screenStatus,omitempty"`
+	ScreenStatusFailedReason string  `json:"screenStatusFailedReason,omitempty"`
+	TransactionHash          string  `json:"transactionHash,omitempty"`
+	TransactionUUID          string  `json:"transactionUUID,omitempty"`
+	Type                     string  `json:"type,omitempty"`
+	AddDate                  string  `json:"addDate,omitempty"`
+}
+
+// FrozenViewMetadata - metadata for frozen transaction view form
+var FrozenViewMetadata = []FormMetadataDto{
+	{Name: "risk", Type: "Integer", Label: "Risk", BVisible: true},
+	{Name: "riskLabel", Type: "String", Label: "Risk Label", BVisible: true},
+	{Name: "screenStatus", Type: "String", Label: "Screen Status", BVisible: true},
+	{Name: "screenStatusFailedReason", Type: "String", Label: "Screen Status Failed Reason", BVisible: true},
+	{Name: "transactionHash", Type: "String", Label: "Transaction Hash", BVisible: true},
+	{Name: "transactionUUID", Type: "String", Label: "Transaction UUID", BVisible: true},
+	{Name: "type", Type: "String", Label: "Type", BVisible: true},
+	{Name: "addDate", Type: "DateTime", Label: "Date of Query", BVisible: true},
+}
+
+// UnfreezeRequest - POST /frozentransactionsmodule/unfreeze
+type UnfreezeRequest struct {
+	CustomerTransactionID int `json:"customerTransactionID"`
+}
+
+// =====================================================
+// PendingTransactionsTreasuryModule - DTOs
+// =====================================================
+
+// TreasuryCancelRequest - POST /pendingtransactionstreasurymodule/cancel
+type TreasuryCancelRequest struct {
+	CustomerAssetAccountsTransactionsId int64  `json:"customerAssetAccountsTransactionsId"`
+	TransactionDetailsJson              string `json:"transactionDetailsJson,omitempty"`
+	BRefundFee                          bool   `json:"bRefundFee"`
+	BCancelled                          bool   `json:"bCancelled"`
+}
+
+// TreasuryCancelResponse - response for POST /pendingtransactionstreasurymodule/cancel
+type TreasuryCancelResponse struct {
+	CustomerTransactionCancellationRequestsId int   `json:"customerTransactionCancellationRequestsId"`
+	CustomerAssetAccountsTransactionsId       int64 `json:"customerAssetAccountsTransactionsId"`
 }
