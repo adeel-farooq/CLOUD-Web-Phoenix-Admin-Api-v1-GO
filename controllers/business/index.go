@@ -338,3 +338,82 @@ func GetCustomerList(c *gin.Context) {
 		),
 	})
 }
+
+
+func GetAllProductsList(c *gin.Context) {
+    user := auth.ExtractUser(c)
+    if user == nil {
+        c.JSON(http.StatusUnauthorized, gin.H{"message": "Unauthorized"})
+        return
+    }
+    siteUsersId := user["id"].(int)
+
+    // query params
+    q := admin.ParseQueryRecordList(c.Request.URL.Query())
+
+    // .NET flow: load selections + override
+    ex := admin.LoadListSelections(siteUsersId, "ProductListings")
+    admin.OverrideWithSelections(&q, ex)
+
+    // SP name (verify in DB)
+    spName := "v1_AdminRole_CustomersModule_GetAllProducts"
+
+    cfg := admin.ListSPConfig{
+        ListKey:      "ProductListings",
+        TrackingID:   "DefaultTrackingID",
+        ColumnMap:    ProductListingsColumnMap(),
+        SearchFields: ProductListingsSearchFields(),
+    }
+
+    spParams := BuildProductListingsSPParamsNetLike(q, siteUsersId, cfg)
+
+    res, err := auth.ExecSP(db.DB, spName, spParams, 2)
+
+    if err != nil {
+        cols := NormalizeColumnsDetailsNull(ProductListingsColumns())
+        c.JSON(200, gin.H{
+            "id":     siteUsersId,
+            "status": "1",
+            "errors": []string{},
+            "details": BuildListDetailsNetLike(
+                cols,
+                []map[string]interface{}{},
+                q,
+                0,
+                []map[string]string{{"message": err.Error()}},
+            ),
+        })
+        return
+    }
+
+    rows := admin.AsRows(res)
+
+    total := 0
+    if len(rows) > 0 {
+        if v, ok := rows[0]["HowManyResults"]; ok {
+            total = toInt(v)
+        }
+    }
+
+    listData := make([]map[string]interface{}, 0, len(rows))
+    for _, row := range rows {
+        item := admin.NormalizeRowKeys(row)
+        listData = append(listData, item)
+    }
+
+    cols := NormalizeColumnsDetailsNull(ProductListingsColumns())
+
+    c.JSON(200, gin.H{
+        "id":     siteUsersId,
+        "status": "1",
+        "errors": []string{},
+        "details": BuildListDetailsNetLike(
+            cols,
+            listData,
+            q,
+            total,
+            []map[string]string{},
+        ),
+    })
+}
+

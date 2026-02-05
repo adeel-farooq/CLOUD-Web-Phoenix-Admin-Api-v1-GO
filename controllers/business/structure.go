@@ -320,3 +320,36 @@ func CustomerAssetAccountsColumns() []map[string]interface{} {
 		},
 	}
 }
+
+
+
+
+// Product Listings module (v1_AdminRole_CustomersModule_GetAllProducts)
+func ProductListingsColumnMap() map[string]string {
+    return map[string]string{
+        "sourceProductsID":    "SourceProducts.Id",
+        "sourceProductName":   "SourceProducts.ProductName",
+        "sourceAssetsID":      "SourceAssets.Id",
+        "sourceAssetName":     "SourceAssets.AssetName",
+        "countriesID":         "Countries.Id",
+        "countryName":         "Countries.CountryName",
+        "payeeAssetsID":       "PayeeAssets.Id",
+        "payeeAssetName":      "PayeeAssets.AssetName",
+        "transferProductsID":  "TransferProducts.Id",
+        "transferProductName": "TransferProducts.ProductName",
+        "bPersonalPayment":    "ProductListings.bPersonalPayment",
+        "bCompanyPayment":     "ProductListings.bCompanyPayment",
+    }
+}
+
+func ProductListingsSearchFields() []string {
+    return []string{
+        "SourceProducts.ProductName",
+        "SourceAssets.AssetName",
+        "Countries.CountryName",
+        "PayeeAssets.AssetName",
+        "TransferProducts.ProductName",
+    }
+}
+
+
