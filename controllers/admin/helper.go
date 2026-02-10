@@ -1,0 +1,1805 @@
+package admin
+
+import (
+	"cloud-web-phoenix-customer-v1-go/controllers/auth"
+	"fmt"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode"
+
+	"cloud-web-phoenix-customer-v1-go/db"
+	"encoding/json"
+	// "github.com/jmoiron/sqlx"
+)
+
+func ParseQueryRecordList(q url.Values) QueryRecordList {
+	parseBool := func(v string) bool { return strings.ToLower(strings.TrimSpace(v)) == "true" }
+	parseInt := func(v string) int {
+		i, _ := strconv.Atoi(strings.TrimSpace(v))
+		return i
+	}
+
+	out := QueryRecordList{
+		Filters:       q.Get("filters"),
+		Search:        q.Get("search"),
+		SortBy:        q.Get("sortBy"),
+		CustomColumns: q.Get("customColumns"),
+		PageNumber:    parseInt(q.Get("pageNumber")),
+		PageSize:      parseInt(q.Get("pageSize")),
+		BClearFilters: parseBool(q.Get("bClearFilters")),
+		BClearSearch:  parseBool(q.Get("bClearSearch")),
+		BClearSortBy:  parseBool(q.Get("bClearSortBy")),
+		BResetColumns: parseBool(q.Get("bResetColumns")),
+	}
+
+	// defaults (.NET idea)
+	if out.PageNumber == 0 {
+		out.PageNumber = 1
+	}
+	if out.PageSize == 0 {
+		out.PageSize = 10
+	}
+	return out
+}
+
+// --------------------
+// .NET: OverrideWithExistingListSelections
+// --------------------
+func OverrideWithSelections(q *QueryRecordList, ex *ListSelections) {
+	if ex == nil {
+		return
+	}
+
+	// pagination defaults from DB selections (if missing)
+	if q.PageNumber == 0 && ex.PageNumber > 0 {
+		q.PageNumber = ex.PageNumber
+	}
+	if q.PageSize == 0 && ex.PageSize > 0 {
+		q.PageSize = ex.PageSize
+	}
+	if q.PageNumber == 0 {
+		q.PageNumber = 1
+	}
+	if q.PageSize == 0 {
+		q.PageSize = 10
+	}
+
+	// filters
+	if q.BClearFilters {
+		q.Filters = ""
+	} else {
+		if strings.TrimSpace(q.Filters) == "" && ex.FilterString != "" {
+			q.Filters = ex.FilterString
+		} else if ex.FilterString != "" && strings.TrimSpace(q.Filters) != "" && q.Filters != ex.FilterString {
+			q.PageNumber = 1
+		}
+	}
+
+	// search
+	if q.BClearSearch {
+		q.Search = ""
+	} else {
+		if strings.TrimSpace(q.Search) == "" && ex.FullTextSearchString != "" {
+			q.Search = ex.FullTextSearchString
+		} else if ex.FullTextSearchString != "" && strings.TrimSpace(q.Search) != "" && q.Search != ex.FullTextSearchString {
+			q.PageNumber = 1
+		}
+	}
+
+	// sort
+	if q.BClearSortBy {
+		q.SortBy = ""
+	} else {
+		if strings.TrimSpace(q.SortBy) == "" && ex.SortString != "" {
+			q.SortBy = ex.SortString
+		}
+	}
+
+	// custom columns
+	if q.BResetColumns {
+		q.CustomColumns = ""
+	} else {
+		if strings.TrimSpace(q.CustomColumns) == "" && ex.CustomColumnsString != "" {
+			q.CustomColumns = ex.CustomColumnsString
+		}
+	}
+}
+
+// --------------------
+// Selections row -> struct (ExecSP output row mapper)
+// --------------------
+func SelectionsFromRow(row map[string]interface{}) *ListSelections {
+	if row == nil {
+		return nil
+	}
+	getStr := func(k string) string {
+		v := row[k]
+		if v == nil {
+			return ""
+		}
+		switch t := v.(type) {
+		case string:
+			return t
+		case []byte:
+			return string(t)
+		default:
+			return fmt.Sprint(t)
+		}
+	}
+	getInt := func(k string) int {
+		v := row[k]
+		if v == nil {
+			return 0
+		}
+		switch t := v.(type) {
+		case int:
+			return t
+		case int64:
+			return int(t)
+		case float64:
+			return int(t)
+		default:
+			i, _ := strconv.Atoi(fmt.Sprint(t))
+			return i
+		}
+	}
+
+	return &ListSelections{
+		FilterString:         getStr("FilterString"),
+		SortString:           getStr("SortString"),
+		FullTextSearchString: getStr("FullTextSearchString"),
+		CustomColumnsString:  getStr("CustomColumnsString"),
+		PageNumber:           getInt("PageNumber"),
+		PageSize:             getInt("PageSize"),
+	}
+}
+
+// --------------------
+// SQL builders (filters/sort/search) — whitelist based
+// --------------------
+func escapeSQL(val string) string { return strings.ReplaceAll(val, "'", "''") }
+
+func resolveColumn(colMap map[string]string, key string) (string, bool) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+	if col, ok := colMap[key]; ok {
+		return col, true
+	}
+	// Many clients send PascalCase keys like "AdminUsers__Id" while our whitelist
+	// uses lower-first-letter keys like "adminUsers__Id".
+	alt := LowercaseFirstChar(key)
+	if alt != key {
+		if col, ok := colMap[alt]; ok {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+func ConvertSortToSQL(sortStr string, colMap map[string]string) string {
+	sortStr = strings.TrimSpace(sortStr)
+	if sortStr == "" {
+		return ""
+	}
+
+	parts := strings.Split(sortStr, "|")
+	out := []string{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		chunks := strings.Fields(p)
+		if len(chunks) != 2 {
+			continue
+		}
+		key := chunks[0]
+		dir := strings.ToUpper(chunks[1])
+		if dir != "ASC" && dir != "DESC" {
+			continue
+		}
+		col, ok := resolveColumn(colMap, key)
+		if !ok {
+			continue
+		}
+		out = append(out, col+" "+dir)
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, ", ")
+}
+
+// ConvertSortToSP converts the frontend sort string into the value we pass to SQL stored procedures.
+// Many SPs expect column *keys* (e.g. "AdminUsers__AdminUsersCode DESC"), not SQL column names.
+// We still validate the keys against the whitelist ColumnMap.
+func ConvertSortToSP(sortStr string, colMap map[string]string) string {
+	sortStr = strings.TrimSpace(sortStr)
+	if sortStr == "" {
+		return ""
+	}
+
+	parts := strings.Split(sortStr, "|")
+	out := []string{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		chunks := strings.Fields(p)
+		if len(chunks) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(chunks[0])
+		dir := strings.ToUpper(strings.TrimSpace(chunks[1]))
+		if dir != "ASC" && dir != "DESC" {
+			continue
+		}
+		if _, ok := resolveColumn(colMap, key); !ok {
+			continue
+		}
+		out = append(out, UppercaseFirstChar(key)+" "+dir)
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	return strings.Join(out, ", ")
+}
+
+func ConvertFiltersToSQL(filterStr string, colMap map[string]string) string {
+	filterStr = strings.TrimSpace(filterStr)
+	if filterStr == "" {
+		return ""
+	}
+
+	re := regexp.MustCompile(`^(.+?)\s+([A-Z]+)\s+\((.+)\)$`)
+	parts := strings.Split(filterStr, "|")
+	sqlParts := []string{}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		m := re.FindStringSubmatch(part)
+		if len(m) != 4 {
+			continue
+		}
+
+		key := strings.TrimSpace(m[1])
+		op := strings.TrimSpace(m[2])
+		raw := strings.TrimSpace(m[3])
+
+		col, ok := resolveColumn(colMap, key)
+		if !ok {
+			continue
+		}
+
+		val := escapeSQL(raw)
+
+		switch op {
+		case "EQ":
+			sqlParts = append(sqlParts, col+" = '"+val+"'")
+		case "CONTAINS":
+			sqlParts = append(sqlParts, col+" LIKE '%"+val+"%'")
+		case "BETWEEN":
+			chunks := strings.Split(raw, "TO")
+			if len(chunks) == 2 {
+				from := escapeSQL(strings.TrimSpace(chunks[0]))
+				to := escapeSQL(strings.TrimSpace(chunks[1]))
+				if from != "" && to != "" {
+					sqlParts = append(sqlParts, col+" BETWEEN '"+from+"' AND '"+to+"'")
+				}
+			}
+		}
+	}
+
+	if len(sqlParts) == 0 {
+		return ""
+	}
+	return " AND " + strings.Join(sqlParts, " AND ")
+}
+
+func ConvertSearchToSQL(search string, fields []string) string {
+	search = strings.TrimSpace(search)
+	if search == "" || len(fields) == 0 {
+		return ""
+	}
+	s := escapeSQL(search)
+
+	orParts := []string{}
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		orParts = append(orParts, f+" LIKE '%"+s+"%'")
+	}
+	if len(orParts) == 0 {
+		return ""
+	}
+	return " WHERE (" + strings.Join(orParts, " OR ") + ")"
+}
+
+// --------------------
+// SP Params builder (generic)
+// --------------------
+func BuildListSPParams(q QueryRecordList, siteUsersId int, cfg ListSPConfig) map[string]interface{} {
+	params := map[string]interface{}{
+		"User_SiteUsersID": siteUsersId,
+		"PageNumber":       q.PageNumber,
+		"PageSize":         q.PageSize,
+		"ListKey":          cfg.ListKey,
+		"TrackingID":       cfg.TrackingID,
+		"RawSortString":    q.SortBy,
+		"RawFilterString":  q.Filters,
+		"RawSearchString":  q.Search,
+	}
+
+	if strings.TrimSpace(q.Filters) != "" {
+		if sqlFilters := ConvertFiltersToSQL(q.Filters, cfg.ColumnMap); sqlFilters != "" {
+			params["Filters"] = sqlFilters
+		}
+	}
+	if strings.TrimSpace(q.SortBy) != "" {
+		if spSort := ConvertSortToSP(q.SortBy, cfg.ColumnMap); spSort != "" {
+			params["SortBy"] = spSort
+		}
+	}
+	if strings.TrimSpace(q.Search) != "" {
+		if sqlSearch := ConvertSearchToSQL(q.Search, cfg.SearchFields); sqlSearch != "" {
+			params["SearchString"] = sqlSearch
+		}
+	}
+
+	return params
+}
+
+// --------------------
+// Response details builder (generic)
+// --------------------
+func BuildListDetails(columns []map[string]interface{}, listData []map[string]interface{}, q QueryRecordList, resultsCount int) map[string]interface{} {
+	var filters interface{}
+	if strings.TrimSpace(q.Filters) != "" {
+		filters = DeserializeFilters(q.Filters)
+	}
+
+	var sortBy interface{}
+	if strings.TrimSpace(q.SortBy) != "" {
+		sortBy = q.SortBy
+	}
+
+	var searchString interface{}
+	if strings.TrimSpace(q.Search) != "" {
+		searchString = q.Search
+	}
+
+	return map[string]interface{}{
+		"bHasSearchField": true,
+		"columns":         columns,
+		"customColumns":   nil,
+		"filters":         filters,
+		"listData":        listData,
+		"summaryRows":     []interface{}{},
+		"pageNumber":      q.PageNumber,
+		"pageSize":        q.PageSize,
+		"resultsCount":    resultsCount,
+		"sortBy":          sortBy,
+		"searchString":    searchString,
+		"errors":          []interface{}{},
+		"metadata":        map[string]interface{}{},
+	}
+}
+
+// frontend compatible filters array
+func DeserializeFilters(filterStr string) []map[string]interface{} {
+	filterStr = strings.TrimSpace(filterStr)
+	if filterStr == "" {
+		return []map[string]interface{}{}
+	}
+
+	re := regexp.MustCompile(`^(.+?)\s+([A-Z]+)\s+\((.+)\)$`)
+	parts := strings.Split(filterStr, "|")
+
+	group := map[string][]map[string]interface{}{}
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		m := re.FindStringSubmatch(p)
+		if len(m) != 4 {
+			continue
+		}
+		col := strings.TrimSpace(m[1])
+		op := strings.TrimSpace(m[2])
+		val := strings.TrimSpace(m[3])
+
+		group[col] = append(group[col], map[string]interface{}{
+			"columnKey": col,
+			"operator":  op,
+			"value":     val,
+		})
+	}
+
+	out := []map[string]interface{}{}
+	for col, arr := range group {
+		out = append(out, map[string]interface{}{
+			"columnKey": col,
+			"filters":   arr,
+		})
+	}
+	return out
+}
+
+func GetAdminUsersModuleListColumns() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id",
+			"orderNumber": 1, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "Integer",
+			"filterMetadata": map[string]interface{}{"filterType": "Amount", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code",
+			"orderNumber": 2, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address",
+			"orderNumber": 3, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name",
+			"orderNumber": 4, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name",
+			"orderNumber": 5, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed",
+			"orderNumber": 6, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type": "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Active"},
+						{"value": "1", "label": "Inactive"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date",
+			"orderNumber": 7, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "DateTime",
+			"filterMetadata": map[string]interface{}{"filterType": "DateTime:Range", "details": map[string]interface{}{}},
+			"tooltip":        nil,
+		},
+	}
+}
+func GetLicenseeAdminUsersModuleListColumns() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"columnKey": "AdminUsers__Id", "labelKey": "Id", "labelValue": "Id",
+			"orderNumber": 1, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "Integer",
+			"filterMetadata": map[string]interface{}{"filterType": "Amount", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__AdminUsersCode", "labelKey": "AdminUsersCode", "labelValue": "Code",
+			"orderNumber": 2, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "SiteUsers__EmailAddress", "labelKey": "EmailAddress", "labelValue": "Email Address",
+			"orderNumber": 3, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__FirstName", "labelKey": "FirstName", "labelValue": "First Name",
+			"orderNumber": 4, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__LastName", "labelKey": "LastName", "labelValue": "Last Name",
+			"orderNumber": 5, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "AdminUsers__JobTitle", "labelKey": "JobTitle", "labelValue": "Job Title",
+			"orderNumber": 6, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "Licensees__LicenseeName", "labelKey": "LicenseeName", "labelValue": "Licensee Name",
+			"orderNumber": 7, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "String",
+			"filterMetadata": map[string]interface{}{"filterType": "TextContains", "details": nil},
+			"tooltip":        nil,
+		},
+		{
+			"columnKey": "SiteUsers__bSuppressed", "labelKey": "bSuppressed", "labelValue": "Suppressed",
+			"orderNumber": 8, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type": "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Active"},
+						{"value": "1", "label": "Inactive"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey": "AdminUsers__AddDate", "labelKey": "AddDate", "labelValue": "Add Date",
+			"orderNumber": 9, "bSortable": true, "bFilterable": true, "bVisible": true, "bLocked": false,
+			"type":           "DateTime",
+			"filterMetadata": map[string]interface{}{"filterType": "DateTime:Range", "details": map[string]interface{}{}},
+			"tooltip":        nil,
+		},
+	}
+}
+func GetAdminRolesModuleListColumns() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"columnKey":      "AdminRoles__Id",
+			"labelKey":       "Id",
+			"labelValue":     "Id",
+			"orderNumber":    1,
+			"bSortable":      false,
+			"bFilterable":    false,
+			"bVisible":       false,
+			"bLocked":        false,
+			"type":           "Integer",
+			"filterMetadata": nil,
+			"tooltip":        nil,
+		},
+		{
+			"columnKey":   "AdminRoles__Name",
+			"labelKey":    "Name",
+			"labelValue":  "Name",
+			"orderNumber": 2,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "TextContains",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "AdminRoles__Level",
+			"labelKey":    "Level",
+			"labelValue":  "Level",
+			"orderNumber": 3,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "String",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "MultipleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "Admin", "label": "Admin"},
+						{"value": "Licensee", "label": "Licensee"},
+						{"value": "LicenseeBrand", "label": "Licensee Brand"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "AdminRoles__bSuppressed",
+			"labelKey":    "bSuppressed",
+			"labelValue":  "Suppressed",
+			"orderNumber": 4,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "Boolean",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Active"},
+						{"value": "1", "label": "Inactive"},
+					},
+				},
+			},
+			"tooltip": nil,
+		},
+		{
+			"columnKey":   "AdminRoles__AddDate",
+			"labelKey":    "AddDate",
+			"labelValue":  "Add Date",
+			"orderNumber": 5,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        "DateTime",
+			"filterMetadata": map[string]interface{}{
+				"filterType": "DateTime:Range",
+				"details":    map[string]interface{}{},
+			},
+			"tooltip": nil,
+		},
+	}
+}
+
+func LowercaseFirstChar(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
+func UppercaseFirstChar(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}
+
+func NormalizeRowKeys(row map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(row))
+
+	for k, v := range row {
+		// system fields skip (same as .NET DTO ignoring)
+		if k == "HowManyResults" || k == "RowNum" {
+			continue
+		}
+		out[LowercaseFirstChar(k)] = v
+	}
+	return out
+}
+
+func BuildColumnsFromSPRow(row map[string]interface{}, orderStart int) []map[string]interface{} {
+	ignore := map[string]bool{
+		"RowNum":         true,
+		"HowManyResults": true,
+	}
+
+	typeGuess := func(v interface{}) (colType string, filterType string) {
+		switch v.(type) {
+		case int, int32, int64, float32, float64:
+			return "Integer", "Amount"
+		case bool:
+			return "Boolean", "SingleChoice"
+		default:
+			// datetime guess
+			s := fmt.Sprint(v)
+			if strings.Contains(s, "T") || strings.Contains(s, ":") {
+				// rough datetime detection
+				return "DateTime", "DateTime:Range"
+			}
+			return "String", "TextContains"
+		}
+	}
+
+	cols := []map[string]interface{}{}
+	order := orderStart
+
+	for k, v := range row {
+		if ignore[k] {
+			continue
+		}
+
+		colType, filterType := typeGuess(v)
+
+		col := map[string]interface{}{
+			"columnKey":   k, // NOTE: yahan same key rahegi (later normalize)
+			"labelKey":    strings.ReplaceAll(strings.ReplaceAll(k, "__", " "), "_", " "),
+			"labelValue":  strings.ReplaceAll(strings.ReplaceAll(k, "__", " "), "_", " "),
+			"orderNumber": order,
+			"bSortable":   true,
+			"bFilterable": true,
+			"bVisible":    true,
+			"bLocked":     false,
+			"type":        colType,
+			"tooltip":     nil,
+		}
+
+		// filterMetadata
+		if filterType == "SingleChoice" && colType == "Boolean" {
+			col["filterMetadata"] = map[string]interface{}{
+				"filterType": "SingleChoice",
+				"details": map[string]interface{}{
+					"PossibleValues": []map[string]string{
+						{"value": "0", "label": "Active"},
+						{"value": "1", "label": "Inactive"},
+					},
+				},
+			}
+		} else {
+			col["filterMetadata"] = map[string]interface{}{
+				"filterType": filterType,
+				"details":    map[string]interface{}{},
+			}
+		}
+
+		cols = append(cols, col)
+		order++
+	}
+
+	// IMPORTANT: map iteration random hoti hai, ordering fix karo
+	sort.Slice(cols, func(i, j int) bool {
+		return cols[i]["columnKey"].(string) < cols[j]["columnKey"].(string)
+	})
+
+	// Ab orderNumber ko final stable order me reset kar do
+	for i := range cols {
+		cols[i]["orderNumber"] = orderStart + i
+	}
+
+	return cols
+}
+
+func GetAdminRoleLevels() []map[string]interface{} {
+	return []map[string]interface{}{
+		{"label": "Admin", "value": "Admin"},
+		{"label": "Licensee", "value": "Licensee"},
+		{"label": "LicenseeBrand", "value": "LicenseeBrand"},
+	}
+}
+
+func GetAdminRolesCreateMetadata() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"name": "Name", "type": "String", "customType": nil, "label": "Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "bSuppressed", "type": "Boolean", "customType": nil, "label": "Suppressed",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "Level", "type": "SingleSelect", "customType": nil, "label": "Level",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": "listAdminRoleLevels",
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AccessRights", "type": "AccessRights", "customType": nil, "label": "Access Rights",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+	}
+}
+
+// -------------- SP Call --------------
+
+func LoadAdminRolesCreateDetails(level string) (map[string]interface{}, map[string]interface{}, error) {
+	spName := "v1_AdminRole_AdminRolesModule_GetCreateDetails"
+	params := map[string]interface{}{}
+	if strings.TrimSpace(level) != "" {
+		params["AdminRoleLevel"] = level
+	}
+
+	// SP returns single row: Status, Id, Details (json), Errors
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	row, ok := res.(map[string]interface{})
+	if !ok {
+		return nil, nil, err
+	}
+
+	// Parse Details JSON (SP JSON PATH nested strings issue)
+	detailsStr, _ := row["Details"].(string)
+	parsed, err := ParseAndFixNestedJSON(detailsStr)
+	if err != nil {
+		return row, nil, err
+	}
+
+	// Convert SP PascalCase keys -> frontend expected camelCase keys (for details/accessRights)
+	details := BuildCreateDetailsForFrontend(parsed)
+
+	return row, details, nil
+}
+
+func LoadAdminRolesEditDetails(siteUsersId int, id int) (map[string]interface{}, map[string]interface{}, error) {
+	spName := "v1_AdminRole_AdminRolesModule_GetEditDetails"
+	params := map[string]interface{}{
+		"User_SiteUsersID": siteUsersId,
+		"Id":               id,
+	}
+
+	// SP returns single row: Status, Id, Details (json), Errors
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid SP response")
+	}
+
+	detailsRaw := ""
+	if v, ok := row["Details"]; ok && v != nil {
+		detailsRaw = fmt.Sprint(v)
+	}
+
+	parsed, err := ParseAndFixNestedJSON(detailsRaw)
+	if err != nil {
+		return row, nil, err
+	}
+
+	// Convert SP PascalCase keys -> frontend expected camelCase keys
+	details := BuildCreateDetailsForFrontend(parsed)
+	return row, details, nil
+}
+
+// -------------- JSON Helpers --------------
+
+// SP ke Details me nested JSON aksar string form me hota hai (AccessRights, ChildElements)
+// Ye function usko recursively real array/map me convert kar deta hai.
+func ParseAndFixNestedJSON(raw string) (map[string]interface{}, error) {
+	out := map[string]interface{}{}
+
+	if strings.TrimSpace(raw) == "" {
+		return out, nil
+	}
+
+	// SQL output is already valid JSON; no need for replace, but safe handling:
+	clean := strings.TrimSpace(raw)
+
+	if err := json.Unmarshal([]byte(clean), &out); err != nil {
+		return nil, err
+	}
+
+	fixed := fixNestedJSON(out)
+	asMap, _ := fixed.(map[string]interface{})
+	if asMap == nil {
+		return map[string]interface{}{}, nil
+	}
+	return asMap, nil
+}
+
+func fixNestedJSON(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		for k, val := range t {
+			t[k] = fixNestedJSON(val)
+		}
+		return t
+	case []interface{}:
+		for i := range t {
+			t[i] = fixNestedJSON(t[i])
+		}
+		return t
+	case string:
+		s := strings.TrimSpace(t)
+		if len(s) > 0 && (s[0] == '{' || s[0] == '[') {
+			var x interface{}
+			if err := json.Unmarshal([]byte(s), &x); err == nil {
+				return fixNestedJSON(x)
+			}
+		}
+		return t
+	default:
+		return v
+	}
+}
+
+// -------------- Mapping Helpers --------------
+
+func BuildCreateDetailsForFrontend(spDetails map[string]interface{}) map[string]interface{} {
+	// SP keys: Id, Name, bSuppressed, Level, AccessRights (often decoded to []interface{})
+	// Frontend keys: id, name, bSuppressed, level, listAdminRoleLevels, accessRights
+
+	out := map[string]interface{}{}
+	out["id"] = toInt(spDetails["Id"])
+	out["name"] = spDetails["Name"]
+
+	// bSuppressed SQL gives 0/1 (float64) sometimes
+	out["bSuppressed"] = toBool(spDetails["bSuppressed"])
+
+	out["level"] = spDetails["Level"]
+	out["listAdminRoleLevels"] = GetAdminRoleLevels()
+
+	// accessRights: rename keys inside tree
+	out["accessRights"] = renameAccessTree(spDetails["AccessRights"])
+
+	return out
+}
+
+// NormalizeAdminRoleDetails converts whatever the SP returned in DbResultRow.Details
+// into the .NET-compatible payload (camelCase keys + listAdminRoleLevels + accessRights tree).
+// This avoids any extra DB round-trip to GetEditDetails.
+func NormalizeAdminRoleDetails(details interface{}) map[string]interface{} {
+	if details == nil {
+		return map[string]interface{}{
+			"listAdminRoleLevels": GetAdminRoleLevels(),
+			"accessRights":        []interface{}{},
+		}
+	}
+
+	// If it's already in frontend shape (camelCase), keep it and just ensure required keys.
+	if m, ok := details.(map[string]interface{}); ok {
+		fixedAny := fixNestedJSON(m)
+		fixed, _ := fixedAny.(map[string]interface{})
+		if fixed == nil {
+			fixed = map[string]interface{}{}
+		}
+		if _, hasCamel := fixed["id"]; hasCamel {
+			if _, ok := fixed["listAdminRoleLevels"]; !ok {
+				fixed["listAdminRoleLevels"] = GetAdminRoleLevels()
+			}
+			if _, ok := fixed["accessRights"]; !ok {
+				fixed["accessRights"] = []interface{}{}
+			}
+			return fixed
+		}
+		// Otherwise treat it as SP shape (PascalCase)
+		return BuildCreateDetailsForFrontend(fixed)
+	}
+
+	// Sometimes SP details come as stringified JSON
+	if s, ok := details.(string); ok {
+		parsed, err := ParseAndFixNestedJSON(s)
+		if err == nil {
+			if _, hasCamel := parsed["id"]; hasCamel {
+				if _, ok := parsed["listAdminRoleLevels"]; !ok {
+					parsed["listAdminRoleLevels"] = GetAdminRoleLevels()
+				}
+				if _, ok := parsed["accessRights"]; !ok {
+					parsed["accessRights"] = []interface{}{}
+				}
+				return parsed
+			}
+			return BuildCreateDetailsForFrontend(parsed)
+		}
+	}
+
+	// Best-effort: marshal/unmarshal into map
+	b, err := json.Marshal(details)
+	if err == nil {
+		var m map[string]interface{}
+		if err2 := json.Unmarshal(b, &m); err2 == nil {
+			fixedAny := fixNestedJSON(m)
+			fixed, _ := fixedAny.(map[string]interface{})
+			if fixed == nil {
+				fixed = map[string]interface{}{}
+			}
+			if _, hasCamel := fixed["id"]; hasCamel {
+				if _, ok := fixed["listAdminRoleLevels"]; !ok {
+					fixed["listAdminRoleLevels"] = GetAdminRoleLevels()
+				}
+				if _, ok := fixed["accessRights"]; !ok {
+					fixed["accessRights"] = []interface{}{}
+				}
+				return fixed
+			}
+			return BuildCreateDetailsForFrontend(fixed)
+		}
+	}
+
+	return map[string]interface{}{
+		"listAdminRoleLevels": GetAdminRoleLevels(),
+		"accessRights":        []interface{}{},
+	}
+}
+
+func renameAccessTree(v interface{}) interface{} {
+	switch t := v.(type) {
+	case []interface{}:
+		for i := range t {
+			t[i] = renameAccessTree(t[i])
+		}
+		return t
+	case map[string]interface{}:
+		out := map[string]interface{}{}
+		// SP keys: Id, DisplayName, Path, bHasAccess, ChildElements
+		if val, ok := t["Id"]; ok {
+			out["id"] = toInt(val)
+		}
+		if val, ok := t["DisplayName"]; ok {
+			out["displayName"] = val
+		}
+		if val, ok := t["Path"]; ok {
+			out["path"] = val
+		}
+		if val, ok := t["bHasAccess"]; ok {
+			out["bHasAccess"] = toBool(val)
+		}
+		// ChildElements can be null or [] or string-json already fixed
+		if val, ok := t["ChildElements"]; ok {
+			out["childElements"] = renameAccessTree(val)
+		} else {
+			out["childElements"] = nil
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func toInt(v interface{}) int {
+	switch x := v.(type) {
+	case int:
+		return x
+	case int64:
+		return int(x)
+	case float64:
+		return int(x)
+	case string:
+		// best-effort
+		var i int
+		_ = json.Unmarshal([]byte(x), &i)
+		return i
+	default:
+		return 0
+	}
+}
+
+func toBool(v interface{}) bool {
+	switch x := v.(type) {
+	case bool:
+		return x
+	case int:
+		return x != 0
+	case int64:
+		return x != 0
+	case float64:
+		return x != 0
+	case string:
+		s := strings.ToLower(strings.TrimSpace(x))
+		return s == "1" || s == "true" || s == "yes"
+	default:
+		return false
+	}
+}
+
+func isValidAdminRoleLevel(level string) bool {
+	switch level {
+	case "Admin", "Licensee", "LicenseeBrand":
+		return true
+	default:
+		return false
+	}
+}
+
+func getAddedByFromToken(user map[string]interface{}) string {
+	fn := fmt.Sprint(user["FirstName"])
+	ln := fmt.Sprint(user["LastName"])
+	role := fmt.Sprint(user["AccountType"])
+	code := fmt.Sprint(user["UserCode"])
+
+	full := strings.TrimSpace(fn + " " + ln)
+
+	// Final required format:
+	// Younas Shafi (Admin - ADM1090)
+	return fmt.Sprintf("%s (%s - %s)", full, role, code)
+}
+
+func buildAdminRoleCreateMetadata() []FormMeta {
+	return []FormMeta{
+		{
+			Name: "Name", Type: "String", Label: "Name",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "bSuppressed", Type: "Boolean", Label: "Suppressed",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "Level", Type: "SingleSelect", Label: "Level",
+			BRequired: false, BRemoteDataSource: false, DataSource: "listAdminRoleLevels",
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+		{
+			Name: "AccessRights", Type: "AccessRights", Label: "Access Rights",
+			BRequired: true, BRemoteDataSource: false, DataSource: nil,
+			Header: nil, OrderNumber: 0, BVisible: false, BSortable: false,
+			Editable: false, BFilterable: false,
+		},
+	}
+}
+
+func parseDbResultRow(row map[string]interface{}) (DbResultRow, error) {
+	out := DbResultRow{
+		Id:      0,
+		Status:  "0",
+		Details: map[string]interface{}{},
+		Errors:  []string{},
+	}
+
+	toInt := func(v interface{}) (int, bool) {
+		if v == nil {
+			return 0, false
+		}
+		switch t := v.(type) {
+		case int:
+			return t, true
+		case int64:
+			return int(t), true
+		case float64:
+			return int(t), true
+		default:
+			return 0, false
+		}
+	}
+
+	// Id (different SPs may use different names)
+	for _, k := range []string{"Id", "ID", "AdminRolesId", "AdminRoleId", "RoleId"} {
+		if v, ok := row[k]; ok {
+			if id, ok := toInt(v); ok {
+				out.Id = id
+				break
+			}
+		}
+	}
+
+	// Status
+	if v, ok := row["Status"]; ok && v != nil {
+		out.Status = fmt.Sprint(v)
+	}
+
+	// Details JSON
+	if v, ok := row["Details"]; ok && v != nil {
+		s := fmt.Sprint(v)
+		if strings.TrimSpace(s) != "" {
+			var obj interface{}
+			if err := json.Unmarshal([]byte(s), &obj); err == nil {
+				out.Details = obj
+			} else {
+				// Some SPs return JSON using single quotes
+				clean := strings.ReplaceAll(s, "'", "\"")
+				if err2 := json.Unmarshal([]byte(clean), &obj); err2 == nil {
+					out.Details = obj
+				} else {
+					out.Details = s
+				}
+			}
+		}
+	}
+
+	// Errors JSON (some SPs might use different field names)
+	if v, ok := row["Errors"]; ok && v != nil {
+		s := fmt.Sprint(v)
+		if strings.TrimSpace(s) != "" {
+			var arr []string
+			if err := json.Unmarshal([]byte(s), &arr); err == nil {
+				out.Errors = arr
+			} else {
+				clean := strings.ReplaceAll(s, "'", "\"")
+				if err2 := json.Unmarshal([]byte(clean), &arr); err2 == nil {
+					out.Errors = arr
+				} else {
+					out.Errors = []string{s}
+				}
+			}
+		}
+	} else if v, ok := row["ValidationMessage"]; ok && v != nil {
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s != "" {
+			out.Errors = []string{s}
+		}
+	}
+
+	return out, nil
+}
+
+func spGetCreateDetails(level string) (DbResultRow, error) {
+	sp := "v1_AdminRole_AdminRolesModule_GetCreateDetails"
+	params := map[string]interface{}{
+		"AdminRoleLevel": level,
+	}
+	res, err := auth.ExecSP(db.DB, sp, params, 1)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+	return parseDbResultRow(row)
+}
+
+func spCreateAdminRole(siteUsersId int, addedBy string, req AdminRoleCreateRequest) (DbResultRow, error) {
+
+	// SP expects comma-separated CDL in @AccessRightsCdl
+	accessCdl := BuildAccessRightsCDL(req.AccessRights)
+
+	sp := "v1_AdminRole_AdminRolesModule_Create"
+	params := map[string]interface{}{
+		"Name":             req.Name,
+		"AdminRoleLevel":   req.Level,
+		"bSuppressed":      req.BSuppressed,
+		"AccessRightsCdl":  accessCdl,
+		"User_SiteUsersID": siteUsersId,
+		"User_AddedBy":     addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+	return parseDbResultRow(rows[0])
+}
+
+func spEditAdminRole(siteUsersId int, addedBy string, req AdminRoleEditRequest) (DbResultRow, error) {
+	accessCdl := BuildAccessRightsCDL(req.AccessRights)
+
+	sp := "v1_AdminRole_AdminRolesModule_Edit"
+	params := map[string]interface{}{
+		"AdminRolesId":      req.Id,
+		"Name":              req.Name,
+		"bSuppressed":       req.BSuppressed,
+		"AccessRightsCdl":   accessCdl,
+		"User_SiteUsersID":  siteUsersId,
+		"User_LastEditedBy": addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+	return parseDbResultRow(rows[0])
+}
+
+func BuildAccessRightsCDL(nodes []AccessRightNode) string {
+	seen := map[int]bool{}
+	ids := make([]int, 0, 128)
+
+	var walk func(list []AccessRightNode)
+	walk = func(list []AccessRightNode) {
+		for _, n := range list {
+			if n.BHasAccess {
+				if !seen[n.Id] {
+					seen[n.Id] = true
+					ids = append(ids, n.Id)
+				}
+			}
+			if len(n.ChildElements) > 0 {
+				walk(n.ChildElements)
+			}
+		}
+	}
+	walk(nodes)
+
+	// join with comma
+	if len(ids) == 0 {
+		return ""
+	}
+	sb := strings.Builder{}
+	for i, id := range ids {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(strconv.Itoa(id))
+	}
+	return sb.String()
+}
+func spDeleteAdminRoles(siteUsersId int, deletedBy string, ids []int) (DbResultRow, error) {
+	idsCdl := idsToCDL(ids)
+	if strings.TrimSpace(idsCdl) == "" {
+		return DbResultRow{}, fmt.Errorf("ids are required")
+	}
+
+	// ✅ Replace with your real SP name from DB
+	sp := "v1_AdminRole_AdminRolesModule_Delete"
+
+	params := map[string]interface{}{
+		"IdsToDelete":      idsCdl, // common pattern
+		"User_SiteUsersID": siteUsersId,
+		"User_DeletedBy":   deletedBy, // some SPs use this
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, fmt.Errorf("invalid SP response")
+	}
+
+	return parseDbResultRow(row)
+}
+
+func parseDeleteDetails(details interface{}) DeleteDetails {
+	out := DeleteDetails{
+		SuccessfulDeletions: []int{},
+		FailedDeletions:     []int{},
+	}
+
+	// details could already be map (or JSON string)
+	var m map[string]interface{}
+	switch t := details.(type) {
+	case map[string]interface{}:
+		m = t
+	case string:
+		s := strings.TrimSpace(t)
+		if s != "" {
+			_ = json.Unmarshal([]byte(s), &m)
+			if m == nil {
+				clean := strings.ReplaceAll(s, "'", "\"")
+				_ = json.Unmarshal([]byte(clean), &m)
+			}
+		}
+	default:
+		// best-effort marshal/unmarshal
+		b, err := json.Marshal(details)
+		if err == nil {
+			_ = json.Unmarshal(b, &m)
+		}
+	}
+	if m == nil {
+		return out
+	}
+
+	// helper for []interface{} -> []int
+	toIntSlice := func(v interface{}) []int {
+		arr := []int{}
+		raw, ok := v.([]interface{})
+		if !ok || raw == nil {
+			return arr
+		}
+		for _, it := range raw {
+			switch t := it.(type) {
+			case int:
+				arr = append(arr, t)
+			case int64:
+				arr = append(arr, int(t))
+			case float64:
+				arr = append(arr, int(t))
+			default:
+				i, err := strconv.Atoi(fmt.Sprint(t))
+				if err == nil {
+					arr = append(arr, i)
+				}
+			}
+		}
+		return arr
+	}
+
+	if v, ok := m["successfulDeletions"]; ok {
+		out.SuccessfulDeletions = toIntSlice(v)
+	} else if v, ok := m["SuccessfulDeletions"]; ok {
+		out.SuccessfulDeletions = toIntSlice(v)
+	}
+	if v, ok := m["failedDeletions"]; ok {
+		out.FailedDeletions = toIntSlice(v)
+	} else if v, ok := m["FailedDeletions"]; ok {
+		out.FailedDeletions = toIntSlice(v)
+	}
+	return out
+}
+func spGetAdminUserCreateDetails(adminRolesId *int) (DbResultRow, error) {
+	sp := "v1_AdminRole_AdminUsersModule_GetCreateDetails"
+
+	params := map[string]interface{}{
+		"AdminRolesId": nil,
+	}
+	if adminRolesId != nil {
+		params["AdminRolesId"] = *adminRolesId
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 1)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, fmt.Errorf("invalid SP response")
+	}
+
+	return parseDbResultRow(row)
+}
+func GetAdminUsersModuleMetadata() []map[string]interface{} {
+	// .NET-aligned AdminUsers create/edit form metadata
+	return []map[string]interface{}{
+		{
+			"name": "Title", "type": "String", "customType": nil, "label": "Title",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "FirstName", "type": "String", "customType": nil, "label": "First Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "LastName", "type": "String", "customType": nil, "label": "Last Name",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "EmailAddress", "type": "String", "customType": nil, "label": "Email Address",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "JobTitle", "type": "String", "customType": nil, "label": "Job Title",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "PhoneNumber", "type": "String", "customType": nil, "label": "Phone Number",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "bSuppressed", "type": "Boolean", "customType": nil, "label": "Suppressed",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AdminRolesId", "type": "SingleSelect", "customType": nil, "label": "Admin Role",
+			"bRequired": false, "bRemoteDataSource": false, "dataSource": "listAdminRoles",
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+		{
+			"name": "AccessRights", "type": "AccessRights", "customType": nil, "label": "Access Rights",
+			"bRequired": true, "bRemoteDataSource": false, "dataSource": nil,
+			"header": nil, "orderNumber": 0, "bVisible": false, "bSortable": false,
+			"editable": false, "bFilterable": false,
+		},
+	}
+}
+
+// NormalizeAdminUserCreateDetails ensures a stable details shape for AdminUsersModule_GetCreateDetails.
+// It guarantees presence of listAdminRoles and accessRights keys and fixes nested JSON strings.
+func NormalizeAdminUserCreateDetails(details interface{}) map[string]interface{} {
+	base := map[string]interface{}{}
+
+	// Parse to map
+	switch t := details.(type) {
+	case map[string]interface{}:
+		base = t
+	case string:
+		parsed, err := ParseAndFixNestedJSON(t)
+		if err == nil {
+			base = parsed
+		}
+	default:
+		b, err := json.Marshal(details)
+		if err == nil {
+			_ = json.Unmarshal(b, &base)
+		}
+	}
+
+	if base == nil {
+		base = map[string]interface{}{}
+	}
+
+	// Fix nested JSON (e.g., AccessRights / ChildElements as string)
+	if fixedAny := fixNestedJSON(base); fixedAny != nil {
+		if fixedMap, ok := fixedAny.(map[string]interface{}); ok && fixedMap != nil {
+			base = fixedMap
+		}
+	}
+
+	// Normalize common scalar fields to frontend camelCase model keys
+	// and delete their PascalCase variants to avoid duplicates.
+	if v, ok := base["Id"]; ok {
+		if _, has := base["id"]; !has {
+			base["id"] = toInt(v)
+		}
+		delete(base, "Id")
+	}
+	if v, ok := base["Title"]; ok {
+		if _, has := base["title"]; !has {
+			base["title"] = v
+		}
+		delete(base, "Title")
+	}
+	if v, ok := base["FirstName"]; ok {
+		if _, has := base["firstName"]; !has {
+			base["firstName"] = v
+		}
+		delete(base, "FirstName")
+	}
+	if v, ok := base["LastName"]; ok {
+		if _, has := base["lastName"]; !has {
+			base["lastName"] = v
+		}
+		delete(base, "LastName")
+	}
+	if v, ok := base["EmailAddress"]; ok {
+		if _, has := base["emailAddress"]; !has {
+			base["emailAddress"] = v
+		}
+		delete(base, "EmailAddress")
+	}
+	if v, ok := base["PhoneNumber"]; ok {
+		if _, has := base["phoneNumber"]; !has {
+			base["phoneNumber"] = v
+		}
+		delete(base, "PhoneNumber")
+	}
+	if v, ok := base["JobTitle"]; ok {
+		if _, has := base["jobTitle"]; !has {
+			base["jobTitle"] = v
+		}
+		delete(base, "JobTitle")
+	}
+	if v, ok := base["AdminRolesId"]; ok {
+		if _, has := base["adminRolesId"]; !has {
+			base["adminRolesId"] = v
+		}
+		delete(base, "AdminRolesId")
+	}
+	if v, ok := base["bSuppressed"]; ok {
+		// Keep key as-is; just normalize type
+		base["bSuppressed"] = toBool(v)
+	}
+	if v, ok := base["BSuppressed"]; ok {
+		if _, has := base["bSuppressed"]; !has {
+			base["bSuppressed"] = toBool(v)
+		}
+		delete(base, "BSuppressed")
+	}
+
+	// listAdminRoles (normalize casing)
+	if v, ok := base["listAdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["ListAdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["AdminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else if v, ok := base["adminRoles"]; ok {
+		base["listAdminRoles"] = v
+	} else {
+		base["listAdminRoles"] = []interface{}{}
+	}
+	// prevent duplicate casing keys in response
+	delete(base, "ListAdminRoles")
+	delete(base, "AdminRoles")
+	delete(base, "adminRoles")
+
+	// accessRights (normalize casing and shape)
+	var rights interface{}
+	if v, ok := base["accessRights"]; ok {
+		rights = v
+	} else if v, ok := base["AccessRights"]; ok {
+		rights = v
+	} else {
+		rights = []interface{}{}
+	}
+	delete(base, "AccessRights")
+
+	// If rights come in SP PascalCase tree, rename to frontend tree
+	base["accessRights"] = renameAccessTree(rights)
+
+	// Ensure stable model keys exist (even if nil) to match .NET payload expectations.
+	ensure := func(k string, def interface{}) {
+		if _, ok := base[k]; !ok {
+			base[k] = def
+		}
+	}
+	ensure("id", 0)
+	ensure("title", nil)
+	ensure("firstName", nil)
+	ensure("lastName", nil)
+	ensure("emailAddress", nil)
+	ensure("jobTitle", nil)
+	ensure("phoneNumber", nil)
+	ensure("adminRolesId", nil)
+	ensure("bSuppressed", false)
+	ensure("siteUsersId", nil)
+	ensure("listAdminRoles", []interface{}{})
+	ensure("accessRights", []interface{}{})
+
+	return base
+}
+
+// IMPORTANT: SP name yahan set karo (agar tumhare DB me different ho)
+func spCreateAdminUser(siteUsersId int, addedBy string, req AdminUserCreateRequest) (DbResultRow, error) {
+	accessCdl := BuildAccessRightsCDL(req.AccessRights)
+
+	userName := strings.TrimSpace(req.EmailAddress)
+	if userName == "" {
+		userName = strings.TrimSpace(req.UserName)
+	}
+
+	sp := "v1_AdminRole_AdminUsersModule_Create"
+
+	// ---- Params mapping (SQL param names yahan match karna hota hai) ----
+	// Tumhare DB me params ho sakte hain:
+	// @Title, @FirstName, @LastName, @EmailAddress, @JobTitle, @PhoneNumber, @bSuppressed, @AdminRolesId, @AccessRightsCdl, @User_SiteUsersID, @User_AddedBy
+	params := map[string]interface{}{
+		"Title":           req.Title,
+		"FirstName":       req.FirstName,
+		"LastName":        req.LastName,
+		"UserName":        userName,
+		"EmailAddress":    req.EmailAddress,
+		"JobTitle":        req.JobTitle,
+		"PhoneNumber":     req.PhoneNumber,
+		"bSuppressed":     req.BSuppressed,
+		"AdminRolesId":    req.AdminRolesId, // nullable ok
+		"AccessRightsCdl": accessCdl,
+
+		"User_SiteUsersID": siteUsersId,
+		"User_AddedBy":     addedBy,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, err
+	}
+
+	rows, ok := res.([]map[string]interface{})
+	if !ok || len(rows) == 0 {
+		return DbResultRow{}, fmt.Errorf("empty SP response")
+	}
+
+	return parseDbResultRow(rows[0])
+}
+
+// Full details (to match .NET "bigger details payload")
+func LoadAdminUsersEditDetails(siteUsersId int, id int) (DbResultRow, interface{}, error) {
+	sp := "v1_AdminRole_AdminUsersModule_GetEditDetails"
+
+	params := map[string]interface{}{
+		"User_SiteUsersID": siteUsersId,
+		"Id":               id,
+	}
+
+	res, err := auth.ExecSP(db.DB, sp, params, 2)
+	if err != nil {
+		return DbResultRow{}, nil, err
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok {
+		return DbResultRow{}, nil, fmt.Errorf("invalid SP response")
+	}
+
+	dbRes, err := parseDbResultRow(row)
+	if err != nil {
+		return DbResultRow{}, nil, err
+	}
+
+	// dbRes.Details already parsed JSON (object/array)
+	return dbRes, dbRes.Details, nil
+}
+func idsToCDL(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	sb := strings.Builder{}
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if sb.Len() > 0 {
+			sb.WriteString(",")
+		}
+		sb.WriteString(strconv.Itoa(id))
+	}
+	return sb.String()
+}
+func LoadListSelections(siteUsersId int, listKey string) *ListSelections {
+
+	spName := "v1_General_ListSelectionsModule_GetSiteUsersListSelections"
+
+	params := map[string]interface{}{
+		"SiteUsersId": siteUsersId,
+		"TrackingId":  "DefaultTrackingID",
+		"ListKey":     listKey,
+	}
+
+	// .NET: Execute SP
+	res, err := auth.ExecSP(db.DB, spName, params, 1)
+	if err != nil {
+		return nil
+	}
+
+	row, ok := auth.AsSingleRow(res)
+	if !ok || row == nil {
+		return nil
+	}
+
+	// .NET: Map DB row → ListSelections DTO
+	return &ListSelections{
+		SortString:           toString(row["SortString"]),
+		FilterString:         toString(row["FilterString"]),
+		FullTextSearchString: toString(row["FullTextSearchString"]),
+		CustomColumnsString:  toString(row["CustomColumnsString"]),
+		PageNumber:           toInt(row["PageNumber"]),
+		PageSize:             toInt(row["PageSize"]),
+	}
+}
+
+func toString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	case []byte:
+		return string(t)
+	default:
+		s := strings.TrimSpace(fmt.Sprint(v))
+		if s == "<nil>" {
+			return ""
+		}
+		return s
+	}
+}
+
+func AsRows(res interface{}) []map[string]interface{} {
+	if res == nil {
+		return []map[string]interface{}{}
+	}
+
+	// already correct type
+	if rows, ok := res.([]map[string]interface{}); ok {
+		return rows
+	}
+
+	return []map[string]interface{}{}
+}
+func AsSingleRow(res interface{}) (map[string]interface{}, bool) {
+	rows := AsRows(res)
+	if len(rows) == 0 {
+		return nil, false
+	}
+	return rows[0], true
+}

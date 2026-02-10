@@ -2,6 +2,7 @@ package main
 
 import (
 	"cloud-web-phoenix-customer-v1-go/db"
+	"cloud-web-phoenix-customer-v1-go/pkg"
 	"cloud-web-phoenix-customer-v1-go/routes"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 )
 
 func main() {
+	// gin.SetMode(gin.ReleaseMode)
 	// Load .env file
 	_ = godotenv.Load()
 
@@ -30,6 +32,8 @@ func main() {
 	}
 
 	r := gin.Default()
+	r.Use(pkg.CORSMiddleware())
+	r.Use(pkg.RecoveryWithLogger())
 
 	r.GET("/", func(c *gin.Context) {
 		c.String(404, "Not Found")

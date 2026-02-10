@@ -3,8 +3,10 @@ package auth
 type SignInRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Password    string `json:"password" binding:"required"`
-	RememberMe  bool   `json:"rememberMe" binding:"required"`
+	RememberMe  bool   `json:"rememberMe"`
 	AccountType int    `json:"accountType" `
+	TFACode     string `json:"tfaCode"`
+	TFAType     string `json:"tfaType"`
 }
 type UserResponse struct {
 	CustomersId                   *int
@@ -37,4 +39,38 @@ type UserResponse struct {
 	UserCode                      *string
 	AllowedAPIEndpointsCDL        *string
 	NavigationScopesJson          *string
+}
+
+// LoginStatusTypes enum
+const (
+	Success           = 0
+	AccountLocked     = 1
+	PasswordInvalid   = 2
+	TfaCodeInvalid    = 3
+	TfaCodeExpired    = 4
+	SMSTfaEnabled     = 5
+	AppTfaEnabled     = 6
+	UserNotFound      = 7
+	AccountSuppressed = 8
+	NoTfaEnabled      = 9
+	EmailNotVerified  = 10
+	TfaTypeInvalid    = 11
+)
+
+// TfaTypes enum
+const (
+	TfaAuthenticatorApp = "AuthenticatorApp"
+	TfaSMS              = "SMS"
+)
+
+type TfaLoginRequest struct {
+	// .NET me AccountType JsonIgnore hota hai, so ignore (optional)
+	AccountType *int `json:"accountType,omitempty"`
+
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	RememberMe bool   `json:"rememberMe"`
+
+	TfaCode string `json:"tfaCode"`
+	TfaType string `json:"tfaType"` // "SMS" | "AuthenticatorApp"
 }
